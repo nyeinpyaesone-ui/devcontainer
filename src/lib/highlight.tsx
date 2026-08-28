@@ -1,112 +1,87 @@
 import type { ReactNode } from "react";
 
-/* Tiny sequential regex scanner → token spans. No deps, no lookbehind. */
+// Lightweight line-based tokenizer → React spans. No innerHTML, no deps.
 
-interface Rule {
-  re: RegExp; // sticky
-  cls: string;
-  /** require previous char to be whitespace / start of line */
-  sp?: boolean;
-}
+export type Lang = "bash" | "json" | "dockerfile";
 
-const BASH: Rule[] = [
-  { re: /"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'/gy, cls: "tk-s" },
-  { re: /\$\{[^}]*\}|\$\([^)]*\)|\$[A-Za-z_]\w*/gy, cls: "tk-v" },
-  { re: /#.*/gy, cls: "tk-c" },
-  {
-    re: /\b(?:if|then|else|elif|fi|for|in|do|done|while|until|case|esac|function|set|local|export|readonly|declare|return|exit|shift|exec|trap|source|command)\b/gy,
-    cls: "tk-k",
-  },
-  { re: /--?[A-Za-z][\w-]*/gy, cls: "tk-f", sp: true },
-  { re: /\b\d+(?:\.\d+)?\b/gy, cls: "tk-n" },
-  { re: /[|&;<>(){}[\]=]+/gy, cls: "tk-p" },
-];
+const BASH_RE =
+  /(#.*$)|("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*')|(\$\{[^}]*\}|\$[A-Za-z_]\w*|\$\?|\$\*)|\b(if|then|else|elif|fi|for|while|do|done|case|esac|in|function|set|export|local|readonly|trap|exit|return|umask|shift)\b|\b(echo|printf|cd|mkdir|chmod|command|docker|git|cat|curl|bash|sh|zsh|source|exec|read|numfmt|tr|awk|grep|wc|sudo|apt-get|npm|npx|node|devcontainer|code|install|pull|login|run|clone|image|info|export|die|ok|log|warn|chmod)\b|(^|\s)(--?[A-Za-z][\w-]*)|(\b\d+(?:\.\d+)?\b)/g;
 
-const JSON_RULES: Rule[] = [
-  { re: /"(?:[^"\\]|\\.)*"(?=\s*:)/gy, cls: "tk-key" },
-  { re: /"(?:[^"\\]|\\.)*"/gy, cls: "tk-s" },
-  { re: /\b(?:true|false|null)\b/gy, cls: "tk-b" },
-  { re: /-?\d+(?:\.\d+)?/gy, cls: "tk-n" },
-  { re: /[{}[\]:,]/gy, cls: "tk-p" },
-];
+const JSON_RE =
+  /("(?:[^"\\]|\\.)*")(\s*:)|("(?:[^"\\]|\\.)*")|(-?\d+(?:\.\d+)?)|\b(true|false|null)\b|([{}[\],])/g;
 
-const YAML_RULES: Rule[] = [
-  { re: /\$\{\{[^}]*\}\}/gy, cls: "tk-v" },
-  { re: /#.*/gy, cls: "tk-c", sp: true },
-  { re: /"[^"]*"|'[^']*'/gy, cls: "tk-s" },
-  { re: /[A-Za-z0-9_.$/-]+(?=\s*:)/gy, cls: "tk-key", sp: true },
-  { re: /\b(?:true|false|null|always|on)\b/gy, cls: "tk-b" },
-  { re: /\b\d+(?:\.\d+)?\b/gy, cls: "tk-n" },
-  { re: /-(?=\s)/gy, cls: "tk-p", sp: true },
-  { re: /[{}[\],]/gy, cls: "tk-p" },
-];
+const DOCKER_RE =
+  /(#.*$)|^(FROM|ARG|RUN|ENV|LABEL|USER|WORKDIR|COPY|ADD|ENTRYPOINT|CMD|EXPOSE|AS)\b|\b(FROM|ARG|RUN|ENV|LABEL|USER|WORKDIR|COPY|ADD|ENTRYPOINT|CMD|EXPOSE|AS)\b|("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*')|(\$\{?\w+\}?|--?[A-Za-z][\w-]*)|(\b\d+(?:\.\d+)?\b)/g;
 
-const RULESETS: Record<string, Rule[]> = {
-  bash: BASH,
-  json: JSON_RULES,
-  yaml: YAML_RULES,
-};
+const CLS = ["tk-c", "tk-s", "tk-v", "tk-k", "tk-b", "tk-f", "tk-n"];
 
-function tokenizeLine(line: string, rules: Rule[]): ReactNode[] {
+function tokenize(line: string, re: RegExp, groupCls: (string | null)[]): ReactNode[] {
   const out: ReactNode[] = [];
-  let pos = 0;
+  let last = 0;
   let key = 0;
-  let plain = "";
-
-  const flush = () => {
-    if (plain) {
-      out.push(<span key={key++}>{plain}</span>);
-      plain = "";
-    }
-  };
-
-  while (pos < line.length) {
-    let matched = false;
-    const prev = pos === 0 ? " " : line[pos - 1];
-    for (const r of rules) {
-      if (r.sp && !/\s/.test(prev)) continue;
-      r.re.lastIndex = pos;
-      const m = r.re.exec(line);
-      if (m && m.index === pos && m[0].length > 0) {
-        flush();
-        out.push(
-          <span key={key++} className={r.cls}>
-            {m[0]}
-          </span>,
-        );
-        pos += m[0].length;
-        matched = true;
+  re.lastIndex = 0;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(line)) !== null) {
+    if (m.index > last) out.push(line.slice(last, m.index));
+    let cls: string | null = null;
+    for (let g = 1; g < m.length; g++) {
+      if (m[g] !== undefined) {
+        cls = groupCls[g - 1] ?? null;
         break;
       }
     }
-    if (!matched) {
-      plain += line[pos];
-      pos += 1;
-    }
+    const text = m[0];
+    out.push(
+      cls ? (
+        <span key={key++} className={cls}>
+          {text}
+        </span>
+      ) : (
+        text
+      )
+    );
+    last = m.index + text.length;
+    if (text.length === 0) re.lastIndex++;
   }
-  flush();
+  if (last < line.length) out.push(line.slice(last));
   return out;
 }
 
-export function Code({
-  code,
-  lang,
-}: {
-  code: string;
-  lang: "bash" | "json" | "yaml";
-}) {
-  const rules = RULESETS[lang];
-  const lines = code.replace(/\n$/, "").split("\n");
-  return (
-    <pre className="font-mono text-[12.5px] leading-[1.7] text-mist-300">
-      {lines.map((ln, i) => (
-        <div key={i} className="flex">
-          <span className="w-11 shrink-0 select-none pr-4 text-right text-[11px] leading-[1.9] text-mist-600/60">
-            {i + 1}
-          </span>
-          <span className="whitespace-pre pr-6">{tokenizeLine(ln, rules)}</span>
-        </div>
-      ))}
-    </pre>
-  );
+const BASH_GROUPS: (string | null)[] = [
+  "tk-c", // 1 comment
+  "tk-s", // 2 string
+  "tk-v", // 3 variable
+  "tk-k", // 4 keyword
+  "tk-b", // 5 command
+  null, // 6 leading-space capture for flags
+  "tk-f", // 7 flag
+  "tk-n", // 8 number
+];
+
+const JSON_GROUPS: (string | null)[] = [
+  "tk-key", // 1 key string
+  null, // 2 colon capture
+  "tk-s", // 3 value string
+  "tk-n", // 4 number
+  "tk-k", // 5 bool/null
+  "tk-p", // 6 punctuation
+];
+
+const DOCKER_GROUPS: (string | null)[] = [
+  "tk-c", // 1 comment
+  "tk-k", // 2 instruction (line-start)
+  "tk-k", // 3 instruction
+  "tk-s", // 4 string
+  "tk-v", // 5 variable/flag
+  "tk-n", // 6 number
+];
+
+export function highlightLine(line: string, lang: Lang): ReactNode {
+  if (lang === "json") return tokenize(line, JSON_RE, JSON_GROUPS);
+  if (lang === "dockerfile") return tokenize(line, DOCKER_RE, DOCKER_GROUPS);
+  return tokenize(line, BASH_RE, BASH_GROUPS);
+}
+
+export function countLines(s: string): number {
+  return s.split("\n").length;
 }
