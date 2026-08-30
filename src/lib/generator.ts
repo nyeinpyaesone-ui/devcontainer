@@ -128,6 +128,9 @@ export const DEFAULT_CONFIG: Config = {
 export const imageRef = (c: Config) =>
   `ghcr.io/${c.owner.toLowerCase()}/${c.repo.toLowerCase()}:${c.tag || "latest"}`;
 
+export const bootstrapLine = (c: Config) =>
+  `curl -fsSL https://raw.githubusercontent.com/${c.owner}/${c.repo}/main/setup-env.sh | bash`;
+
 export const activeFeatures = (c: Config) => c.features.filter((f) => f.on);
 export const activeSteps = (c: Config) => c.postSteps.filter((s) => s.on);
 export const aptList = (c: Config) =>
@@ -522,4 +525,126 @@ export function buildRunLines(c: Config, arts: Artifacts): RunLine[] {
   lines.push({ t: `✔ ${c.repo} environment ready — code "./${c.repo}"`, c: "ok" });
   lines.push({ t: `exit 0 · wall ${formatDuration(estimateSeconds(c))}`, c: "exit" });
   return lines;
+}
+
+// ── image layer estimation ───────────────────────────────────────────────────
+
+export interface LayerInfo {
+  id: string;
+  label: string;
+  detail: string;
+  mb: number;
+  kind: "base" | "feature" | "apt" | "mount";
+}
+
+const BASE_MB: Record<string, number> = {
+  "ubuntu-24.04": 78,
+  "debian-12": 125,
+  "alpine-3.20": 8,
+};
+
+const FEATURE_MB: Record<string, number> = {
+  "din-docker": 92,
+  git: 18,
+  "gh-cli": 32,
+  node: 86,
+  pnpm: 24,
+  python: 112,
+};
+
+export function estimateLayers(c: Config): LayerInfo[] {
+  const layers: LayerInfo[] = [
+    {
+      id: "base",
+      label: `FROM ${imageRef(c)}`,
+      detail: `${c.base} registry base`,
+      mb: BASE_MB[c.base] ?? 78,
+      kind: "base",
+    },
+  ];
+  for (const f of activeFeatures(c)) {
+    layers.push({
+      id: f.id,
+      label: `feature · ${(f.ref.split("/").pop() ?? f.label).replace(/:\d+$/, "")}`,
+      detail: f.version ? `${f.label} pinned to v${f.version}` : f.desc,
+      mb: FEATURE_MB[f.id] ?? 24,
+      kind: "feature",
+    });
+  }
+  const apt = aptList(c);
+  if (apt.length) {
+    layers.push({
+      id: "apt",
+      label: `RUN apt-get install ${apt.slice(0, 3).join(" ")}${apt.length > 3 ? " …" : ""}`,
+      detail: `${apt.length} extra package${apt.length > 1 ? "s" : ""} baked in via Dockerfile`,
+      mb: apt.length * 6,
+      kind: "apt",
+    });
+  }
+  if (c.namedVolume) {
+    layers.push({
+      id: "vol",
+      label: "VOLUME node_modules",
+      detail: "named volume — survives rebuilds, never bloats the image",
+      mb: 0,
+      kind: "mount",
+    });
+  }
+  layers.push({
+    id: "ws",
+    label: `WORKSPACE /workspaces/${c.repo.toLowerCase()}`,
+    detail: "bind mount — lives on your disk, not in the image",
+    mb: 0,
+    kind: "mount",
+  });
+  return layers;
+}
+
+export const totalLayerMb = (layers: LayerInfo[]) =>
+  layers.reduce((a, l) => a + l.mb, 0);
+
+// ── session persistence ──────────────────────────────────────────────────────
+
+const STORE_KEY = "dcforge.manifest.v1";
+
+export function saveConfig(c: Config) {
+  try {
+    localStorage.setItem(STORE_KEY, JSON.stringify(c));
+  } catch {
+    /* storage unavailable — ignore */
+  }
+}
+
+export function clearConfig() {
+  try {
+    localStorage.removeItem(STORE_KEY);
+  } catch {
+    /* ignore */
+  }
+}
+
+export function loadConfig(): { cfg: Config; restored: boolean } {
+  try {
+    const raw = localStorage.getItem(STORE_KEY);
+    if (!raw) return { cfg: DEFAULT_CONFIG, restored: false };
+    const p = JSON.parse(raw) as Partial<Config>;
+    if (!p || typeof p !== "object") return { cfg: DEFAULT_CONFIG, restored: false };
+    const mergeList = <T extends { id: string }>(
+      defs: T[],
+      got?: Array<Partial<T> & { id: string }>
+    ): T[] =>
+      defs.map((d) => {
+        const g = got?.find((x) => x && x.id === d.id);
+        return g ? { ...d, ...g } : d;
+      });
+    const cfg: Config = {
+      ...DEFAULT_CONFIG,
+      ...p,
+      features: mergeList(DEFAULT_CONFIG.features, p.features),
+      postSteps: mergeList(DEFAULT_CONFIG.postSteps, p.postSteps),
+    };
+    return { cfg, restored: true };
+  } catch {
+    return { cfg: DEFAULT_CONFIG, restored: false };
+  }
 }

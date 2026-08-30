@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import CodePanel, { type FileTab } from "./components/CodePanel";
 import DryRunModal from "./components/DryRunModal";
+import LayerStack from "./components/LayerStack";
 import Toasts, { type Toast } from "./components/Toasts";
 import {
   ChipInput,
@@ -19,13 +20,17 @@ import {
 } from "./components/ui";
 import {
   activeFeatures,
+  bootstrapLine,
   buildArtifacts,
   buildRunLines,
   byteSize,
+  clearConfig,
   DEFAULT_CONFIG,
   estimateSeconds,
   formatDuration,
   imageRef,
+  loadConfig,
+  saveConfig,
   shortHash,
   type Config,
 } from "./lib/generator";
@@ -61,15 +66,78 @@ function Ticker({ messages }: { messages: string[] }) {
   );
 }
 
+// ── simulated registry event feed ────────────────────────────────────────────
+
+function FeedLine({ img }: { img: string }) {
+  const events = useMemo(
+    () => [
+      `pull ${img} · 412 MB · 3.4s`,
+      `digest verified · sha256:9f2c41…e1aa`,
+      `attest sbom → spdx · ok`,
+      `push layer 7/7 · done`,
+      `cache hit · skipped pull`,
+    ],
+    [img]
+  );
+  const [i, setI] = useState(0);
+
+  useEffect(() => {
+    const t = window.setInterval(() => setI((x) => (x + 1) % events.length), 2800);
+    return () => clearInterval(t);
+  }, [events.length]);
+
+  return (
+    <span key={i} className="feed-in inline-flex items-center gap-2 min-w-0">
+      <span className="led-live w-1.5 h-1.5 rounded-full bg-lagoon-400 shrink-0" />
+      <span className="truncate">{events[i]}</span>
+    </span>
+  );
+}
+
+// ── bootstrap one-liner strip ────────────────────────────────────────────────
+
+function BootstrapStrip({ line, onToast }: { line: string; onToast: (m: string) => void }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <div className="flex items-center gap-3 rounded-xl border border-ink-700/80 bg-ink-900/70 px-3.5 py-2.5 transition-colors duration-200 hover:border-ember-500/40">
+      <span className="font-mono text-[13px] text-ember-400 shrink-0 select-none">$</span>
+      <code className="font-mono text-[12px] text-mist-300 truncate">{line}</code>
+      <button
+        type="button"
+        onClick={async () => {
+          if (await copyText(line)) {
+            setCopied(true);
+            onToast("bootstrap one-liner copied");
+            window.setTimeout(() => setCopied(false), 1600);
+          } else onToast("Clipboard unavailable in this browser");
+        }}
+        className="ml-auto shrink-0 flex items-center gap-1.5 rounded-md border border-ink-600 px-2.5 py-1.5 font-mono text-[11px] text-mist-300 transition-all hover:border-ember-500/50 hover:text-ember-300 active:scale-95"
+      >
+        {copied ? (
+          <svg viewBox="0 0 16 16" className="w-3 h-3 text-lagoon-400" fill="none" stroke="currentColor" strokeWidth="2">
+            <path d="M3 8.5 6.5 12 13 4.5" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        ) : (
+          <IconCopy className="w-3 h-3" />
+        )}
+        {copied ? "copied" : "copy"}
+      </button>
+    </div>
+  );
+}
+
 // ── app ──────────────────────────────────────────────────────────────────────
 
 export default function App() {
-  const [cfg, setCfg] = useState<Config>(DEFAULT_CONFIG);
+  const [boot] = useState(loadConfig);
+  const [cfg, setCfg] = useState<Config>(boot.cfg);
+  const [tab, setTab] = useState(0);
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [showRun, setShowRun] = useState(false);
   const [verified, setVerified] = useState(false);
   const [scriptCopied, setScriptCopied] = useState(false);
   const toastId = useRef(0);
+  const announcedRestore = useRef(false);
 
   const arts = useMemo(() => buildArtifacts(cfg), [cfg]);
   const runLines = useMemo(() => buildRunLines(cfg, arts), [cfg, arts]);
@@ -77,15 +145,29 @@ export default function App() {
   const feats = activeFeatures(cfg);
   const est = estimateSeconds(cfg);
 
-  const patch = (p: Partial<Config>) => {
-    setCfg((c) => ({ ...c, ...p }));
-    setVerified(false);
-  };
-
   const toast = (msg: string) => {
     const id = ++toastId.current;
     setToasts((t) => [...t.slice(-2), { id, msg }]);
     window.setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 2800);
+  };
+
+  // announce a restored session once
+  useEffect(() => {
+    if (boot.restored && !announcedRestore.current) {
+      announcedRestore.current = true;
+      toast("manifest restored from last session");
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // autosave the manifest
+  useEffect(() => {
+    saveConfig(cfg);
+  }, [cfg]);
+
+  const patch = (p: Partial<Config>) => {
+    setCfg((c) => ({ ...c, ...p }));
+    setVerified(false);
   };
 
   const files: FileTab[] = [
@@ -111,6 +193,28 @@ export default function App() {
     toast("4 artifacts downloaded");
   };
 
+  // keyboard shortcuts — ref pattern keeps closures fresh
+  const keyHandler = useRef<(e: KeyboardEvent) => void>(() => {});
+  keyHandler.current = (e) => {
+    const mod = e.metaKey || e.ctrlKey;
+    if (!mod) return;
+    if (/^[1-4]$/.test(e.key)) {
+      e.preventDefault();
+      setTab(Number(e.key) - 1);
+    } else if (e.key.toLowerCase() === "s") {
+      e.preventDefault();
+      downloadAll();
+    } else if (e.key === "Enter") {
+      e.preventDefault();
+      setShowRun(true);
+    }
+  };
+  useEffect(() => {
+    const h = (e: KeyboardEvent) => keyHandler.current(e);
+    window.addEventListener("keydown", h);
+    return () => window.removeEventListener("keydown", h);
+  }, []);
+
   const tickerMsgs = useMemo(
     () => [
       `resolved ${img} → sha256:${shortHash(arts.setup)}…`,
@@ -125,7 +229,36 @@ export default function App() {
 
   return (
     <div className="min-h-screen flex flex-col">
-      <div className="bg-forge" aria-hidden />
+      {/* ── layered ambient background ─────────────────────────────────── */}
+      <div className="bg-forge" aria-hidden>
+        <div
+          className="absolute bottom-[-180px] left-[-160px] w-[560px] h-[560px] rounded-full"
+          style={{ background: "radial-gradient(circle, rgba(43,184,166,0.085), transparent 65%)" }}
+        />
+        <svg
+          className="float-slow absolute right-[6%] bottom-[16%] w-44 opacity-[0.055]"
+          viewBox="0 0 120 120"
+          fill="none"
+          stroke="#82b6ff"
+          strokeWidth="1.5"
+        >
+          <path d="M60 10 106 33 60 56 14 33Z" strokeLinejoin="round" />
+          <path d="M14 56l46 23 46-23" strokeLinejoin="round" />
+          <path d="M14 80l46 23 46-23" strokeLinejoin="round" />
+        </svg>
+        <svg
+          className="float-slow absolute left-[4%] top-[22%] w-24 opacity-[0.04]"
+          style={{ animationDelay: "-4s", animationDuration: "13s" }}
+          viewBox="0 0 120 120"
+          fill="none"
+          stroke="#f5a83c"
+          strokeWidth="2"
+        >
+          <path d="M60 10 106 33 60 56 14 33Z" strokeLinejoin="round" />
+          <path d="M14 56l46 23 46-23" strokeLinejoin="round" />
+          <path d="M14 80l46 23 46-23" strokeLinejoin="round" />
+        </svg>
+      </div>
 
       {/* ── header ─────────────────────────────────────────────────────── */}
       <header className="sticky top-0 z-40 border-b border-ink-700/70 bg-ink-950/85 backdrop-blur-md">
@@ -206,6 +339,7 @@ export default function App() {
               <button
                 type="button"
                 onClick={() => {
+                  clearConfig();
                   setCfg(DEFAULT_CONFIG);
                   setVerified(false);
                   toast("config reset to forge defaults");
@@ -428,7 +562,10 @@ export default function App() {
                 </div>
               </div>
               <div className="mt-3 pt-3 border-t border-ink-700/70 flex items-center justify-between font-mono text-[10.5px] text-mist-600">
-                <span>bundle {byteSize(arts.setup + arts.json + arts.dockerfile)}</span>
+                <span>
+                  bundle {byteSize(arts.setup + arts.json + arts.dockerfile)} ·{" "}
+                  <span className="text-mist-500">autosaved</span>
+                </span>
                 <span>
                   sha <span className="text-ember-400/90">{shortHash(arts.setup).slice(0, 8)}</span>
                 </span>
@@ -440,93 +577,118 @@ export default function App() {
         {/* right · artifacts */}
         <div className="space-y-5 min-w-0">
           <Reveal delay={60}>
-            <div className="flex flex-wrap items-end gap-x-6 gap-y-2">
-              <div>
-                <p className="font-mono text-[11px] uppercase tracking-[0.22em] text-lagoon-400 mb-1.5">
-                  generated artifacts
+            <div className="relative">
+              <span className="ghost-word" aria-hidden>
+                {cfg.repo}
+              </span>
+              <div className="relative flex flex-wrap items-end gap-x-6 gap-y-3">
+                <div>
+                  <p className="font-mono text-[11px] uppercase tracking-[0.22em] text-lagoon-400 mb-2">
+                    generated artifacts
+                  </p>
+                  <h1 className="font-display font-bold text-[clamp(30px,3.6vw,44px)] leading-[1.05] tracking-[-0.015em] text-mist-100">
+                    The env script for{" "}
+                    <span className="text-ember-400">
+                      {cfg.owner}/{cfg.repo}
+                    </span>
+                    ,<br className="hidden sm:block" /> forged{" "}
+                    <span className="relative inline-block text-lagoon-400">
+                      live
+                      <span className="absolute left-0 -bottom-0.5 h-[3px] w-full bg-lagoon-500/50 rounded-full" />
+                    </span>
+                    .
+                  </h1>
+                </div>
+                <p className="basis-full sm:basis-auto sm:max-w-[330px] text-[13px] text-mist-500 leading-relaxed sm:ml-auto">
+                  Tune the manifest on the left — every keystroke rebuilds{" "}
+                  <code className="font-mono text-[12px] text-mist-300">setup-env.sh</code>, the
+                  devcontainer config and the extending Dockerfile below.
                 </p>
-                <h1 className="font-display font-bold text-[26px] sm:text-[30px] leading-[1.08] text-mist-100">
-                  The env script for{" "}
-                  <span className="text-ember-400">
-                    {cfg.owner}/{cfg.repo}
-                  </span>
-                  <span className="text-mist-600">, forged live.</span>
-                </h1>
               </div>
-              <p className="basis-full sm:basis-auto sm:max-w-[330px] text-[13px] text-mist-500 leading-relaxed sm:ml-auto">
-                Tune the manifest on the left — every keystroke rebuilds{" "}
-                <code className="font-mono text-[12px] text-mist-300">setup-env.sh</code>, the devcontainer
-                config and the extending Dockerfile below.
-              </p>
             </div>
           </Reveal>
 
-          <Reveal delay={120}>
-            <CodePanel files={files} onToast={toast} />
+          <Reveal delay={100}>
+            <BootstrapStrip line={bootstrapLine(cfg)} onToast={toast} />
           </Reveal>
 
-          {/* ship pipeline */}
+          <Reveal delay={140}>
+            <CodePanel files={files} onToast={toast} active={tab} onTabChange={setTab} />
+          </Reveal>
+
           <Reveal delay={180}>
-            <div className="border border-ink-700/80 rounded-xl bg-ink-900/70 px-4 sm:px-5 py-4">
-              <p className="font-mono text-[10.5px] uppercase tracking-[0.2em] text-mist-600 mb-3.5">
-                ship pipeline
-              </p>
-              <ol className="grid sm:grid-cols-3 gap-y-4">
-                {[
-                  {
-                    n: "1",
-                    t: "Bootstrap",
-                    d: "Run the script at the repo root — it pulls the GHCR image, scaffolds .devcontainer/ and writes both configs.",
-                    c: "text-ember-400",
-                    cmd: "./setup-env.sh",
-                  },
-                  {
-                    n: "2",
-                    t: "Rebuild",
-                    d: "Reopen in Container (or devcontainer up). Features install, ports forward, post-create runs.",
-                    c: "text-lagoon-400",
-                    cmd: "devcontainer up --workspace-folder .",
-                  },
-                  {
-                    n: "3",
-                    t: "Share",
-                    d: "Commit .devcontainer/ to the ERP repo — every teammate gets the identical environment.",
-                    c: "text-skyx-400",
-                    cmd: "git add .devcontainer && git commit",
-                  },
-                ].map((s, i) => (
-                  <li key={s.n} className="relative sm:px-4 first:pl-0">
-                    {i > 0 && (
-                      <span className="hidden sm:block absolute left-[-9px] top-[13px] w-[18px] border-t border-dashed border-ink-600" />
-                    )}
-                    <div className="flex items-center gap-2.5 mb-1.5">
-                      <span className={`font-mono text-[11px] w-6 h-6 grid place-items-center rounded-md border border-current/40 ${s.c}`}>
-                        {s.n}
-                      </span>
-                      <span className="font-display font-semibold text-[14px] text-mist-100">{s.t}</span>
-                    </div>
-                    <p className="text-[12px] text-mist-500 leading-relaxed mb-2">{s.d}</p>
-                    <code className={`block font-mono text-[11px] truncate rounded-md bg-ink-950/70 border border-ink-700/70 px-2.5 py-1.5 ${s.c}`}>
-                      {s.cmd}
-                    </code>
-                  </li>
-                ))}
-              </ol>
+            <div className="grid gap-5 xl:grid-cols-[1.05fr_1fr] items-start">
+              <LayerStack cfg={cfg} />
+
+              {/* ship pipeline */}
+              <div className="border border-ink-700/80 rounded-xl bg-ink-900/70 px-4 sm:px-5 py-4 transition-colors duration-300 hover:border-ink-600">
+                <p className="font-mono text-[10.5px] uppercase tracking-[0.2em] text-mist-600 mb-3.5">
+                  ship pipeline
+                </p>
+                <ol className="grid sm:grid-cols-3 gap-y-4">
+                  {[
+                    {
+                      n: "1",
+                      t: "Bootstrap",
+                      d: "Run the script at the repo root — it pulls the GHCR image, scaffolds .devcontainer/ and writes both configs.",
+                      c: "text-ember-400",
+                      cmd: "./setup-env.sh",
+                    },
+                    {
+                      n: "2",
+                      t: "Rebuild",
+                      d: "Reopen in Container (or devcontainer up). Features install, ports forward, post-create runs.",
+                      c: "text-lagoon-400",
+                      cmd: "devcontainer up --workspace-folder .",
+                    },
+                    {
+                      n: "3",
+                      t: "Share",
+                      d: "Commit .devcontainer/ to the ERP repo — every teammate gets the identical environment.",
+                      c: "text-skyx-400",
+                      cmd: "git add .devcontainer && git commit",
+                    },
+                  ].map((s, i) => (
+                    <li key={s.n} className="relative sm:px-4 first:pl-0">
+                      {i > 0 && (
+                        <span className="hidden sm:block absolute left-[-13px] top-[13px] w-[26px] dash-flow" />
+                      )}
+                      <div className="flex items-center gap-2.5 mb-1.5">
+                        <span
+                          className={`font-mono text-[11px] w-6 h-6 grid place-items-center rounded-md border border-current/40 transition-transform duration-200 hover:scale-110 ${s.c}`}
+                        >
+                          {s.n}
+                        </span>
+                        <span className="font-display font-semibold text-[14px] text-mist-100">{s.t}</span>
+                      </div>
+                      <p className="text-[12px] text-mist-500 leading-relaxed mb-2">{s.d}</p>
+                      <code
+                        className={`block font-mono text-[11px] truncate rounded-md bg-ink-950/70 border border-ink-700/70 px-2.5 py-1.5 ${s.c}`}
+                      >
+                        {s.cmd}
+                      </code>
+                    </li>
+                  ))}
+                </ol>
+              </div>
             </div>
           </Reveal>
         </div>
       </main>
 
-      {/* ── footer ─────────────────────────────────────────────────────── */}
+      {/* ── footer with simulated registry feed ────────────────────────── */}
       <footer className="border-t border-ink-700/70 bg-ink-950/80">
         <div className="max-w-[1480px] mx-auto px-4 sm:px-6 py-3.5 flex flex-wrap items-center gap-x-6 gap-y-1.5 font-mono text-[11px] text-mist-600">
           <span className="flex items-center gap-2">
             <span className="led-live w-1.5 h-1.5 rounded-full bg-lagoon-400" />
-            forge v1.4.0 · spec devcontainers/v0.245.2
+            forge v1.5.0 · spec devcontainers/v0.245.2
           </span>
-          <span>artifacts regenerate on every keystroke</span>
-          <span className="ml-auto text-mist-500">
-            target <span className="text-ember-400/90">{img}</span>
+          <span className="hidden md:inline">manifest autosaves to this browser</span>
+          <span className="sm:ml-auto flex items-center gap-2.5 min-w-0 max-w-full">
+            <span className="shrink-0 uppercase tracking-[0.16em] text-[9.5px] text-mist-600 border border-ink-700 rounded px-1.5 py-0.5">
+              ghcr events · sim
+            </span>
+            <FeedLine img={img} />
           </span>
         </div>
       </footer>

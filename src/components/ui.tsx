@@ -377,3 +377,44 @@ export function downloadFile(name: string, content: string) {
   document.body.removeChild(a);
   setTimeout(() => URL.revokeObjectURL(url), 800);
 }
+
+// ── animated number ──────────────────────────────────────────────────────────
+
+export function CountUp({
+  value,
+  duration = 700,
+  className = "",
+}: {
+  value: number;
+  duration?: number;
+  className?: string;
+}) {
+  const [disp, setDisp] = useState(0);
+  const current = useRef(0);
+  const raf = useRef(0);
+
+  useEffect(() => {
+    const from = current.current;
+    const to = value;
+    if (from === to) return;
+    const t0 = performance.now();
+    const tick = (t: number) => {
+      const k = Math.min(1, (t - t0) / duration);
+      const eased = 1 - Math.pow(1 - k, 3);
+      const v = from + (to - from) * eased;
+      current.current = v;
+      setDisp(v);
+      if (k < 1) raf.current = requestAnimationFrame(tick);
+    };
+    raf.current = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf.current);
+  }, [value, duration]);
+
+  return <span className={className}>{Math.round(disp)}</span>;
+}
+
+// ── keyboard key chip ────────────────────────────────────────────────────────
+
+export function Kbd({ children }: { children: ReactNode }) {
+  return <kbd className="kbd">{children}</kbd>;
+}

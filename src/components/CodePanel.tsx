@@ -5,6 +5,7 @@ import {
   IconCheck,
   IconCopy,
   IconDownload,
+  Kbd,
   copyText,
   downloadFile,
 } from "./ui";
@@ -28,11 +29,14 @@ function useCopied() {
 export default function CodePanel({
   files,
   onToast,
+  active,
+  onTabChange,
 }: {
   files: FileTab[];
   onToast: (msg: string) => void;
+  active: number;
+  onTabChange: (i: number) => void;
 }) {
-  const [active, setActive] = useState(0);
   const { copied, mark } = useCopied();
   const file = files[active];
 
@@ -63,7 +67,7 @@ export default function CodePanel({
             <button
               key={f.name}
               type="button"
-              onClick={() => setActive(i)}
+              onClick={() => onTabChange(i)}
               className={`relative shrink-0 flex items-center gap-2 px-4 py-2.5 font-mono text-[12px] transition-colors duration-200 ${
                 isActive
                   ? "text-ember-300 bg-ink-900"
@@ -155,8 +159,17 @@ export default function CodePanel({
         <span className="text-mist-500">
           sha-like <span className="text-ember-400/90">{hash}</span>
         </span>
-        <span className="ml-auto hidden sm:inline text-mist-600">
-          {file.lang} · utf-8 · lf
+        <span className="hidden sm:inline text-mist-600">{file.lang} · utf-8 · lf</span>
+        <span className="ml-auto hidden lg:flex items-center gap-1.5 text-mist-600">
+          <Kbd>⌘</Kbd>
+          <Kbd>1–4</Kbd>
+          tabs
+          <span className="mx-1 text-ink-600">·</span>
+          <Kbd>⌘S</Kbd>
+          save all
+          <span className="mx-1 text-ink-600">·</span>
+          <Kbd>⌘⏎</Kbd>
+          dry-run
         </span>
       </div>
     </div>
