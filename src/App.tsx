@@ -6,6 +6,7 @@ import PolicyMatrix from "./components/PolicyMatrix";
 import Toasts, { type Toast } from "./components/Toasts";
 import {
   ChipInput,
+  CountUp,
   IconCopy,
   IconDownload,
   IconPlay,
@@ -16,6 +17,8 @@ import {
   Select,
   Sparkline,
   Switch,
+  Gauge,
+  Kbd,
   TextField,
   copyText,
   downloadFile,
@@ -31,11 +34,13 @@ import {
   hasViolation,
   imageRef,
   loadConfig,
+  readiness,
   saveConfig,
   shortHash,
   type Config,
   type Enforcement,
 } from "./lib/generator";
+import CommandPalette, { type PaletteGroup, type PaletteItem } from "./components/CommandPalette";
 import { countLines } from "./lib/highlight";
 import { useForgeBackend } from "./lib/useForgeBackend";
 
@@ -137,6 +142,7 @@ export default function App() {
   const [tab, setTab] = useState(0);
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [showRun, setShowRun] = useState(false);
+  const [paletteOpen, setPaletteOpen] = useState(false);
   const [verified, setVerified] = useState(false);
   const [runFailed, setRunFailed] = useState(false);
   const [scriptCopied, setScriptCopied] = useState(false);
@@ -237,6 +243,11 @@ export default function App() {
   keyHandler.current = (e) => {
     const mod = e.metaKey || e.ctrlKey;
     if (!mod) return;
+    if (e.key.toLowerCase() === "k") {
+      e.preventDefault();
+      setPaletteOpen((p) => !p);
+      return;
+    }
     if (/^[1-5]$/.test(e.key)) {
       e.preventDefault();
       setTab(Number(e.key) - 1);
@@ -277,6 +288,118 @@ export default function App() {
     ],
     [img, arts.setup, feats, cfg.ports, cfg, enforcedCount, essCount]
   );
+
+  // ── command palette ────────────────────────────────────────────────────────
+  const goTo = (id: string) =>
+    document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" });
+
+  const ready = readiness(cfg);
+
+  const commands = useMemo<PaletteGroup[]>(() => {
+    const jump = (label: string, id: string, kw: string): PaletteItem => ({
+      id: `go-${id}`,
+      label: `jump to ${label}`,
+      keywords: kw,
+      run: () => goTo(id),
+    });
+    const policyToggles: PaletteItem[] = (
+      [
+        { key: "nonRoot", label: "P1 · non-root execution" },
+        { key: "engines", label: "P2 · runtime pinning" },
+        { key: "secretsGuard", label: "P3 · secret hygiene" },
+        { key: "preCommit", label: "P4 · pre-commit guard" },
+        { key: "schemaGate", label: "P5 · schema gate" },
+      ] as { key: keyof Enforcement; label: string }[]
+    ).map((p) => ({
+      id: `tg-${p.key}`,
+      label: `${cfg.enforce[p.key] ? "disable" : "enable"} ${p.label}`,
+      hint: cfg.enforce[p.key] ? "on" : "off",
+      keywords: "policy gate enforce",
+      run: () => patchEnforce(p.key, !cfg.enforce[p.key]),
+    }));
+    return [
+      {
+        title: "artifacts",
+        items: files.map((f, i) => ({
+          id: `open-${f.name}`,
+          label: `open ${f.name}`,
+          hint: `editor tab ${i + 1}`,
+          kbd: `⌘+${i + 1}`,
+          keywords: "tab file editor view",
+          run: () => {
+            setTab(i);
+            goTo("artifacts");
+          },
+        })),
+      },
+      {
+        title: "actions",
+        items: [
+          { id: "act-dry", label: "simulate dry-run", kbd: "⌘+⏎", keywords: "verify terminal run test", run: () => setShowRun(true) },
+          { id: "act-copy", label: "copy setup-env.sh", keywords: "clipboard script bash", run: () => void copyScript() },
+          { id: "act-dl", label: "download all artifacts", kbd: "⌘+S", keywords: "save export ship zip", run: downloadAll },
+          {
+            id: "act-boot",
+            label: "copy bootstrap one-liner",
+            keywords: "curl install remote pipe bash",
+            run: () => {
+              void copyText(bootstrapLine(cfg)).then((ok) =>
+                toast(ok ? "bootstrap one-liner copied" : "Clipboard unavailable in this browser")
+              );
+            },
+          },
+          {
+            id: "act-reset",
+            label: "reset manifest to defaults",
+            keywords: "clear fresh start undo",
+            run: () => {
+              clearConfig();
+              setCfg(DEFAULT_CONFIG);
+              setVerified(false);
+              setRunFailed(false);
+              toast("manifest reset to defaults");
+            },
+          },
+        ],
+      },
+      {
+        title: "jump to",
+        items: [
+          jump("target registry", "sec-registry", "ghcr image owner repo tag"),
+          jump("base environment", "sec-base", "shell user clone volume smoke"),
+          jump("devcontainer features", "sec-features", "node python dind git gh pnpm"),
+          jump("essential tooling", "sec-tools", "packages apt groups core build shell"),
+          jump("language toolchains", "sec-langs", "rust go java dotnet php ruby pyenv"),
+          jump("network", "sec-network", "ports forward localhost"),
+          jump("editor & bootstrap", "sec-editor", "extensions vscode post-create pipeline"),
+          jump("enforcement", "sec-enforce", "policy gates P1 P2 P3 P4 P5"),
+          jump("image anatomy", "sec-anatomy", "layers size mb docker"),
+          jump("ship readiness", "sec-summary", "score gauge verdict"),
+        ],
+      },
+      {
+        title: "toggles",
+        items: [
+          {
+            id: "tg-clone",
+            label: cfg.cloneRepo ? "disable repo cloning" : "enable repo cloning",
+            hint: cfg.cloneRepo ? "on" : "off",
+            keywords: "git clone workspace shallow",
+            run: () => patch({ cloneRepo: !cfg.cloneRepo }),
+          },
+          {
+            id: "tg-smoke",
+            label: cfg.smokeTest ? "disable smoke test" : "enable smoke test",
+            hint: cfg.smokeTest ? "on" : "off",
+            keywords: "docker run verify image",
+            run: () => patch({ smokeTest: !cfg.smokeTest }),
+          },
+          ...policyToggles,
+        ],
+      },
+    ];
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [files, cfg]);
 
   return (
     <div className="min-h-screen flex flex-col">
@@ -329,6 +452,18 @@ export default function App() {
           <Ticker messages={tickerMsgs} />
 
           <div className="ml-auto flex items-center gap-2.5">
+            <button
+              type="button"
+              onClick={() => setPaletteOpen(true)}
+              title="open command palette"
+              className="hidden md:flex items-center gap-2 rounded-lg border border-ink-600 bg-ink-900/60 px-2.5 py-1.5 font-mono text-[10.5px] text-mist-500 transition-all duration-200 hover:border-ember-500/50 hover:text-ember-300 active:scale-95"
+            >
+              <svg viewBox="0 0 16 16" className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="1.5">
+                <path d="M6 3 3 8l3 5M10 3l3 5-3 5" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+              commands
+              <Kbd>⌘K</Kbd>
+            </button>
             <span
               className={`hidden sm:flex items-center gap-2 font-mono text-[10.5px] px-2.5 py-1.5 rounded-lg border ${
                 verified
@@ -439,7 +574,7 @@ export default function App() {
           </Reveal>
 
           <Reveal delay={40}>
-            <Section index="01" title="Target registry" hint="ghcr.io">
+            <Section index="01" title="Target registry" hint="ghcr.io" anchor="sec-registry">
               <div className="grid grid-cols-2 gap-3">
                 <TextField label="owner / org" value={cfg.owner} onChange={(v) => patch({ owner: v })} />
                 <TextField label="repository" value={cfg.repo} onChange={(v) => patch({ repo: v })} />
@@ -462,7 +597,7 @@ export default function App() {
           </Reveal>
 
           <Reveal delay={80}>
-            <Section index="02" title="Base environment" hint={cfg.base}>
+            <Section index="02" title="Base environment" hint={cfg.base} anchor="sec-base">
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <span className="block text-[10.5px] uppercase tracking-[0.14em] text-mist-600 font-mono mb-1.5">
@@ -541,7 +676,7 @@ export default function App() {
           </Reveal>
 
           <Reveal delay={120}>
-            <Section index="03" title="Devcontainer features" hint={`${feats.length} active`}>
+            <Section index="03" title="Devcontainer features" hint={`${feats.length} active`} anchor="sec-features">
               <div className="space-y-2">
                 {cfg.features.map((f) => (
                   <Switch
@@ -587,6 +722,7 @@ export default function App() {
               index="04"
               title="Essential tooling"
               hint={`${essCount} pkgs pre-installed`}
+              anchor="sec-tools"
             >
               <div className="space-y-2">
                 {cfg.toolGroups.map((g) => (
@@ -634,7 +770,7 @@ export default function App() {
           </Reveal>
 
           <Reveal delay={150}>
-            <Section index="05" title="Language toolchains" hint={`${bundle.langCount} pinned`}>
+            <Section index="05" title="Language toolchains" hint={`${bundle.langCount} pinned`} anchor="sec-langs">
               <div className="space-y-2">
                 {cfg.langs.map((l) => (
                   <Switch
@@ -690,7 +826,7 @@ export default function App() {
           </Reveal>
 
           <Reveal delay={160}>
-            <Section index="06" title="Network" hint={`${cfg.ports.length} ports`}>
+            <Section index="06" title="Network" hint={`${cfg.ports.length} ports`} anchor="sec-network">
               <span className="block text-[10.5px] uppercase tracking-[0.14em] text-mist-600 font-mono mb-1.5">
                 forwarded ports
               </span>
@@ -704,7 +840,7 @@ export default function App() {
           </Reveal>
 
           <Reveal delay={200}>
-            <Section index="07" title="Editor & bootstrap">
+            <Section index="07" title="Editor & bootstrap" anchor="sec-editor">
               <span className="block text-[10.5px] uppercase tracking-[0.14em] text-mist-600 font-mono mb-1.5">
                 VS Code extensions
               </span>
@@ -742,7 +878,7 @@ export default function App() {
           </Reveal>
 
           <Reveal delay={220}>
-            <Section index="08" title="Enforcement" hint={`${enforcedCount}/5 gates`}>
+            <Section index="08" title="Enforcement" hint={`${enforcedCount}/5 gates`} anchor="sec-enforce">
               {(
                 [
                   {
@@ -789,13 +925,72 @@ export default function App() {
 
           {/* live summary */}
           <Reveal delay={240}>
-            <div className="sticky bottom-4 border border-ink-600/80 rounded-xl bg-ink-850/95 backdrop-blur px-4 py-3.5 shadow-[0_16px_44px_-18px_rgba(0,0,0,0.85)]">
+            <div
+              id="sec-summary"
+              className="sticky bottom-4 scroll-mt-24 border border-ink-600/80 rounded-xl bg-ink-850/95 backdrop-blur px-4 py-3.5 shadow-[0_16px_44px_-18px_rgba(0,0,0,0.85)]"
+            >
               <div className="flex items-center justify-between mb-2.5">
                 <span className="font-mono text-[10.5px] uppercase tracking-[0.2em] text-mist-600">
                   live summary
                 </span>
                 <span className="font-mono text-[10.5px] text-lagoon-400">● regenerating</span>
               </div>
+
+              {/* ship readiness gauge */}
+              <div className="flex items-center gap-4 pb-3.5 mb-3.5 border-b border-ink-700/70">
+                <div className="relative shrink-0">
+                  <Gauge score={ready.score} />
+                  <div className="absolute inset-0 grid place-items-center">
+                    <CountUp
+                      value={ready.score}
+                      className="font-display font-bold text-[22px] text-mist-100 tabular-nums"
+                    />
+                  </div>
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span
+                      className={`font-display font-semibold text-[14.5px] tracking-wide ${
+                        ready.blocked
+                          ? "text-coral-400"
+                          : ready.score >= 90
+                            ? "text-lagoon-400"
+                            : ready.score >= 70
+                              ? "text-ember-400"
+                              : ready.score >= 40
+                                ? "text-skyx-400"
+                                : "text-mist-400"
+                      }`}
+                    >
+                      {ready.verdict}
+                    </span>
+                    {ready.blocked && (
+                      <span className="violation-pulse font-mono text-[9.5px] px-1.5 py-0.5 rounded border border-coral-500/50 text-coral-400 bg-coral-500/10">
+                        P1 refuses root
+                      </span>
+                    )}
+                  </div>
+                  <p className="font-mono text-[10.5px] text-mist-600 mt-1 leading-relaxed">
+                    {ready.missing.length
+                      ? `gaps: ${ready.missing.slice(0, 3).join(" · ")}${ready.missing.length > 3 ? " · …" : ""}`
+                      : "every check green — commit and ship"}
+                  </p>
+                  <div className="mt-2 flex flex-wrap gap-1">
+                    {ready.items.map((i) => (
+                      <span
+                        key={i.label}
+                        title={`${i.label} · ${i.on ? `+${i.pts} pts` : "missing"}`}
+                        className={`w-2.5 h-2.5 rounded-[3px] transition-all duration-300 cursor-default ${
+                          i.on
+                            ? "bg-lagoon-500/80 shadow-[0_0_6px_rgba(69,214,194,0.4)]"
+                            : "bg-ink-700 hover:bg-ink-600"
+                        }`}
+                      />
+                    ))}
+                  </div>
+                </div>
+              </div>
+
               <div className="grid grid-cols-4 gap-3">
                 <div>
                   <div key={countLines(arts.setup)} className="stat-flash font-display font-bold text-xl text-mist-100">
@@ -877,13 +1072,17 @@ export default function App() {
             <PolicyMatrix policies={policies} />
           </Reveal>
 
-          <Reveal delay={160}>
-            <CodePanel files={files} onToast={toast} active={tab} onTabChange={setTab} />
-          </Reveal>
+          <div id="artifacts" className="scroll-mt-24">
+            <Reveal delay={160}>
+              <CodePanel files={files} onToast={toast} active={tab} onTabChange={setTab} />
+            </Reveal>
+          </div>
 
           <Reveal delay={180}>
             <div className="grid gap-5 xl:grid-cols-[1.05fr_1fr] items-start">
-              <LayerStack cfg={cfg} />
+              <div id="sec-anatomy" className="scroll-mt-24">
+                <LayerStack cfg={cfg} />
+              </div>
 
               {/* ship pipeline */}
               <div className="border border-ink-700/80 rounded-xl bg-ink-900/70 px-4 sm:px-5 py-4 transition-colors duration-300 hover:border-ink-600">
@@ -972,6 +1171,7 @@ export default function App() {
           }}
         />
       )}
+      <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} groups={commands} />
       <Toasts toasts={toasts} />
     </div>
   );

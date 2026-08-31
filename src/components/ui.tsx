@@ -53,15 +53,20 @@ export function Section({
   index,
   title,
   hint,
+  anchor,
   children,
 }: {
   index: string;
   title: string;
   hint?: string;
+  anchor?: string;
   children: ReactNode;
 }) {
   return (
-    <section className="border border-ink-700/80 bg-ink-900/70 rounded-xl overflow-hidden transition-colors duration-300 hover:border-ink-600">
+    <section
+      id={anchor}
+      className="border border-ink-700/80 bg-ink-900/70 rounded-xl overflow-hidden transition-colors duration-300 hover:border-ink-600 scroll-mt-24"
+    >
       <header className="flex items-baseline gap-3 px-4 pt-3.5 pb-3 border-b border-ink-700/60 bg-ink-850/60">
         <span className="step-num">{index}</span>
         <h2 className="font-display font-semibold tracking-wide text-[15px] text-mist-100">
@@ -417,6 +422,54 @@ export function CountUp({
 
 export function Kbd({ children }: { children: ReactNode }) {
   return <kbd className="kbd">{children}</kbd>;
+}
+
+// ── radial gauge ─────────────────────────────────────────────────────────────
+
+export function Gauge({
+  score,
+  size = 92,
+  className = "",
+}: {
+  score: number;
+  size?: number;
+  className?: string;
+}) {
+  const clamped = Math.min(Math.max(score, 0), 100);
+  const r = (size - 14) / 2;
+  const C = 2 * Math.PI * r;
+  const off = C * (1 - clamped / 100);
+  const color =
+    clamped >= 90 ? "#45d6c2" : clamped >= 70 ? "#ffb454" : clamped >= 40 ? "#57b3ff" : "#f75c74";
+  return (
+    <svg width={size} height={size} className={className} aria-hidden>
+      <circle
+        cx={size / 2}
+        cy={size / 2}
+        r={r}
+        fill="none"
+        stroke="rgba(255,255,255,0.06)"
+        strokeWidth="7"
+      />
+      <circle
+        cx={size / 2}
+        cy={size / 2}
+        r={r}
+        fill="none"
+        stroke={color}
+        strokeWidth="7"
+        strokeLinecap="round"
+        strokeDasharray={C}
+        strokeDashoffset={off}
+        transform={`rotate(-90 ${size / 2} ${size / 2})`}
+        style={{
+          transition:
+            "stroke-dashoffset 0.8s cubic-bezier(0.22, 1, 0.36, 1), stroke 0.4s ease",
+          filter: `drop-shadow(0 0 6px ${color}55)`,
+        }}
+      />
+    </svg>
+  );
 }
 
 // ── latency sparkline ────────────────────────────────────────────────────────

@@ -485,6 +485,54 @@ export function policyMatrix(c: Config): PolicyState[] {
 
 export const hasViolation = (c: Config) => c.enforce.nonRoot && c.remoteUser === "root";
 
+// ── ship readiness scoring ───────────────────────────────────────────────────
+
+export interface ReadinessItem {
+  label: string;
+  pts: number;
+  on: boolean;
+}
+
+export interface Readiness {
+  items: ReadinessItem[];
+  score: number;
+  verdict: string;
+  missing: string[];
+  blocked: boolean;
+}
+
+export function readiness(c: Config): Readiness {
+  const feats = activeFeatures(c);
+  const langs = activeLangs(c);
+  const tools = activeToolGroups(c);
+  const enforced = policyMatrix(c).filter((p) => p.status === "enforced").length;
+  const items: ReadinessItem[] = [
+    { label: "repo clone wired", pts: 10, on: c.cloneRepo },
+    { label: "runtime features", pts: 14, on: feats.length > 0 },
+    { label: "toolchains pinned", pts: 12, on: langs.length > 0 },
+    { label: "essential tooling", pts: 12, on: tools.length >= 2 },
+    { label: "ports forwarded", pts: 8, on: c.ports.length > 0 },
+    { label: "editor extensions", pts: 8, on: c.extensions.length >= 3 },
+    { label: "post-create pipeline", pts: 8, on: activeSteps(c).length > 0 },
+    { label: "policy gates armed", pts: 14, on: enforced >= 4 },
+    { label: "smoke test", pts: 6, on: c.smokeTest },
+    { label: "non-root user", pts: 8, on: c.remoteUser !== "root" },
+  ];
+  const sum = items.reduce((a, i) => a + (i.on ? i.pts : 0), 0);
+  const blocked = hasViolation(c);
+  const score = blocked ? Math.min(sum, 25) : sum;
+  const verdict = blocked
+    ? "policy block"
+    : score >= 90
+      ? "ship-ready"
+      : score >= 70
+        ? "mostly ready"
+        : score >= 40
+          ? "gaps remain"
+          : "skeleton only";
+  return { items, score, verdict, missing: items.filter((i) => !i.on).map((i) => i.label), blocked };
+}
+
 // ── devcontainer.json ────────────────────────────────────────────────────────
 
 export function buildDevcontainerJson(c: Config): string {
