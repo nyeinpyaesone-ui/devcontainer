@@ -29,6 +29,14 @@ export interface Enforcement {
   schemaGate: boolean;
 }
 
+export interface ToolGroup {
+  id: string;
+  label: string;
+  desc: string;
+  on: boolean;
+  pkgs: string[];
+}
+
 export interface Config {
   owner: string;
   repo: string;
@@ -40,8 +48,10 @@ export interface Config {
   ports: string[];
   extensions: string[];
   postSteps: PostStep[];
+  toolGroups: ToolGroup[];
   namedVolume: boolean;
   smokeTest: boolean;
+  cloneRepo: boolean;
   aptExtra: string;
   enforce: Enforcement;
 }
@@ -127,9 +137,61 @@ export const DEFAULT_CONFIG: Config = {
       on: false,
     },
   ],
+  toolGroups: [
+    {
+      id: "core",
+      label: "Core utilities",
+      desc: "The baseline every workspace expects",
+      on: true,
+      pkgs: [
+        "curl",
+        "wget",
+        "jq",
+        "unzip",
+        "zip",
+        "tar",
+        "rsync",
+        "ca-certificates",
+        "gnupg",
+        "lsb-release",
+        "locales",
+        "less",
+        "tree",
+      ],
+    },
+    {
+      id: "build",
+      label: "Build toolchain",
+      desc: "Native modules, bindings and scripts compile clean",
+      on: true,
+      pkgs: ["build-essential", "make", "pkg-config", "cmake", "python3", "python3-pip", "python3-venv"],
+    },
+    {
+      id: "shell",
+      label: "Shell productivity",
+      desc: "Modern replacements that make the terminal fast",
+      on: true,
+      pkgs: ["fzf", "ripgrep", "fd-find", "bat", "eza", "zoxide", "git-delta"],
+    },
+    {
+      id: "vcs",
+      label: "VCS workflow",
+      desc: "gh via apt as fallback when the feature is off",
+      on: true,
+      pkgs: ["git-lfs", "gh", "pre-commit", "tig"],
+    },
+    {
+      id: "net",
+      label: "Network & debug",
+      desc: "For talking to services and tracing failures",
+      on: false,
+      pkgs: ["dnsutils", "iputils-ping", "netcat-openbsd", "iproute2", "openssl", "lsof"],
+    },
+  ],
   namedVolume: true,
   smokeTest: true,
-  aptExtra: "curl, jq, postgresql-client",
+  cloneRepo: true,
+  aptExtra: "postgresql-client, redis-tools",
   enforce: {
     nonRoot: true,
     engines: true,
@@ -154,6 +216,36 @@ export const aptList = (c: Config) =>
     .split(/[,\s]+/)
     .map((s) => s.trim())
     .filter(Boolean);
+
+export const activeToolGroups = (c: Config) => c.toolGroups.filter((g) => g.on);
+
+/** deduplicated essential packages from the enabled tool groups */
+export function essentialPkgs(c: Config): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const g of activeToolGroups(c)) {
+    for (const p of g.pkgs) {
+      if (!seen.has(p)) {
+        seen.add(p);
+        out.push(p);
+      }
+    }
+  }
+  return out;
+}
+
+/** everything the extending Dockerfile installs: essentials + project extras */
+export function imagePkgs(c: Config): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const p of [...essentialPkgs(c), ...aptList(c)]) {
+    if (!seen.has(p)) {
+      seen.add(p);
+      out.push(p);
+    }
+  }
+  return out;
+}
 
 export function postCreateCommand(c: Config): string | null {
   const cmds = activeSteps(c).map((s) => s.cmd);
@@ -236,7 +328,7 @@ export function buildDevcontainerJson(c: Config): string {
   const doc: Record<string, unknown> = {
     name: `${c.repo} · ${c.owner}`,
   };
-  if (aptList(c).length) {
+  if (imagePkgs(c).length) {
     doc.build = { dockerfile: "Dockerfile", args: { BASE_IMAGE: imageRef(c) } };
   } else {
     doc.image = imageRef(c);
@@ -269,12 +361,13 @@ export function buildDevcontainerJson(c: Config): string {
 // ── Dockerfile (extends the published GHCR image) ────────────────────────────
 
 export function buildDockerfile(c: Config): string {
-  const pkgs = aptList(c);
+  const groups = activeToolGroups(c);
+  const extras = aptList(c).filter((p) => !essentialPkgs(c).includes(p));
   const lines: string[] = [
     `# ──────────────────────────────────────────────────────────────────`,
-    `# Extends the published GHCR image with ${c.repo}-specific extras.`,
-    `# Rebuild is triggered automatically because devcontainer.json`,
-    `# points at this Dockerfile via "build.dockerfile".`,
+    `# Extends the published GHCR image with pre-installed essentials`,
+    `# and ${c.repo}-specific extras. Rebuild is triggered automatically`,
+    `# because devcontainer.json points here via "build.dockerfile".`,
     `# ──────────────────────────────────────────────────────────────────`,
     `ARG BASE_IMAGE=${imageRef(c)}`,
     `FROM \${BASE_IMAGE}`,
@@ -284,13 +377,25 @@ export function buildDockerfile(c: Config): string {
     `      devcontainer.base="${c.base}"`,
     ``,
   ];
-  if (pkgs.length) {
+  if (groups.length || extras.length) {
     lines.push(
-      `# extra tooling on top of the ${c.base} base`,
+      `USER root`,
+      ``,
+      `# ── pre-installed development tooling ─────────────────────────────`,
       `RUN apt-get update \\`,
-      `    && apt-get install -y --no-install-recommends \\`,
-      ...pkgs.map((p, i) => `       ${p}${i < pkgs.length - 1 ? " \\" : ""}`),
-      `    && rm -rf /var/lib/apt/lists/*`,
+      `    && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \\`
+    );
+    for (const g of groups) {
+      lines.push(`       # ${g.label.toLowerCase()} — ${g.desc.toLowerCase()}`);
+      lines.push(...g.pkgs.map((p) => `       ${p} \\`));
+    }
+    if (extras.length) {
+      lines.push(`       # project extras from the manifest`);
+      lines.push(...extras.map((p) => `       ${p} \\`));
+    }
+    lines.push(
+      `    && rm -rf /var/lib/apt/lists/* \\`,
+      `    && apt-get clean`,
       ``
     );
   }
@@ -322,7 +427,8 @@ export function buildSetupScript(c: Config, json: string, dockerfile: string): s
     `#  Image     : ${img}`,
     `#  Base      : ${c.base} · shell ${c.shell} · remote user "${c.remoteUser}"`,
     `#  Features  : ${feats.length ? feats.map((f) => f.ref.split("/").pop()).join(", ") : "none"}`,
-    `#  Spec      : devcontainers v0.245+  ·  forge v1.4.0`,
+    `#  Tools     : ${essentialPkgs(c).length ? essentialPkgs(c).length + " essential packages pre-installed" : "none"}`,
+    `#  Spec      : devcontainers v0.245+  ·  forge v1.6.0`,
     `#  Generated : ${iso} UTC — regenerate, don't hand-edit.`,
     `# ─────────────────────────────────────────────────────────────────────`,
     `set -Eeuo pipefail`,
@@ -337,6 +443,7 @@ export function buildSetupScript(c: Config, json: string, dockerfile: string): s
     `IMAGE_REF="\${GHCR_REGISTRY}/\${REPO_OWNER,,}/\${REPO_NAME,,}:\${IMAGE_TAG}"`,
     `PROJECT_DIR="\${PROJECT_DIR:-$PWD/\${REPO_NAME}}"`,
     `DEVCONTAINER_DIR="\${PROJECT_DIR}/.devcontainer"`,
+    `CLONE_REPO="${c.cloneRepo ? 1 : 0}"`,
     ``,
     `# ── ui helpers ───────────────────────────────────────────────────────`,
     `if [ -t 1 ]; then`,
@@ -389,12 +496,15 @@ export function buildSetupScript(c: Config, json: string, dockerfile: string): s
   );
 
   push(
-    `# ── step 4 · workspace scaffold ──────────────────────────────────────`,
-    `if [ ! -d "\${PROJECT_DIR}/.git" ]; then`,
-    `  log "cloning github.com/\${REPO_OWNER}/\${REPO_NAME}"`,
-    `  git clone --depth 1 "https://github.com/\${REPO_OWNER}/\${REPO_NAME}.git" "$PROJECT_DIR"`,
-    `else`,
+    `# ── step 4 · clone repo & scaffold workspace ─────────────────────────`,
+    `if [ -d "\${PROJECT_DIR}/.git" ]; then`,
     `  ok "workspace already present at \${PROJECT_DIR}"`,
+    `elif [ "$CLONE_REPO" = "1" ]; then`,
+    `  log "cloning github.com/\${REPO_OWNER}/\${REPO_NAME} (depth 1)"`,
+    `  git clone --depth 1 "https://github.com/\${REPO_OWNER}/\${REPO_NAME}.git" "$PROJECT_DIR"`,
+    `  ok "cloned → \${PROJECT_DIR}"`,
+    `else`,
+    `  die "workspace not found at \${PROJECT_DIR} — cloning is disabled in the manifest"`,
     `fi`,
     `mkdir -p "$DEVCONTAINER_DIR"`,
     ``
@@ -410,14 +520,21 @@ export function buildSetupScript(c: Config, json: string, dockerfile: string): s
     ``
   );
 
-  if (aptList(c).length) {
+  const imgPkgs = imagePkgs(c);
+  if (imgPkgs.length) {
+    const ess = essentialPkgs(c);
     push(
-      `# ── step 6 · write extending Dockerfile ─────────────────────────────`,
-      `log "writing .devcontainer/Dockerfile"`,
+      `# ── step 6 · write extending Dockerfile (pre-installed tooling) ─────`,
+      `log "writing .devcontainer/Dockerfile — ${imgPkgs.length} packages pre-installed into the image"`,
       `cat > "\${DEVCONTAINER_DIR}/Dockerfile" <<'DEVCONTAINER_DOCKERFILE'`,
       dockerfile,
       `DEVCONTAINER_DOCKERFILE`,
-      `ok "Dockerfile written — image will be extended at build time"`,
+      ...(ess.length
+        ? [
+            `printf '  %sessentials%s: %s\\n' "$C_DIM" "$C_RESET" "${ess.slice(0, 8).join(" · ")}${ess.length > 8 ? " · …" : ""}"`,
+          ]
+        : []),
+      `ok "Dockerfile written — tooling baked in on first 'devcontainer up'"`,
       ``
     );
   }
@@ -714,6 +831,7 @@ export function estimateSeconds(c: Config): number {
   s += activeSteps(c).length * 9;
   const pkgs = aptList(c).length;
   if (pkgs) s += 16 + pkgs * 2;
+  if (essentialPkgs(c).length) s += 24;
   if (c.smokeTest) s += 7;
   if (Object.values(c.enforce).some(Boolean)) s += 8;
   return s;
@@ -760,12 +878,28 @@ export function buildRunLines(c: Config, arts: Artifacts): RunLine[] {
     { t: `▸ pulling ${img}`, c: "log" },
     { t: `  9f2c41e8a5d2 ▸▸▸▸▸▸▸▸▸▸▸▸▸▸▸▸▸▸▸▸ 100% · ${c.base === "alpine-3.20" ? "96 MiB" : "412 MiB"}`, c: "dim" },
     { t: `✔ cached locally`, c: "ok" },
-    { t: `▸ cloning github.com/${c.owner}/${c.repo}`, c: "log" },
-    { t: `▸ writing .devcontainer/devcontainer.json`, c: "log" },
-    { t: `✔ devcontainer.json (${byteSize(arts.json)})`, c: "ok" },
   ];
-  if (aptList(c).length) {
-    lines.push({ t: `✔ Dockerfile written — image will be extended at build time`, c: "ok" });
+  if (c.cloneRepo) {
+    lines.push({ t: `▸ cloning github.com/${c.owner}/${c.repo} (depth 1)`, c: "log" });
+    lines.push({ t: `✔ cloned → ./${c.repo}`, c: "ok" });
+  } else {
+    lines.push({ t: `▲ cloning disabled — expecting an existing workspace at ./${c.repo}`, c: "warn" });
+  }
+  lines.push(
+    { t: `▸ writing .devcontainer/devcontainer.json`, c: "log" },
+    { t: `✔ devcontainer.json (${byteSize(arts.json)})`, c: "ok" }
+  );
+  const ess = essentialPkgs(c);
+  const all = imagePkgs(c);
+  if (all.length) {
+    lines.push({ t: `▸ pre-install manifest → Dockerfile`, c: "log" });
+    if (ess.length) {
+      lines.push({
+        t: `  essentials: ${ess.slice(0, 6).join(" · ")}${ess.length > 6 ? " · …" : ""} (${ess.length} pkgs)`,
+        c: "dim",
+      });
+    }
+    lines.push({ t: `✔ ${all.length} packages will be baked in on first build`, c: "ok" });
   }
   for (const f of feats) {
     lines.push({ t: `  • ${f.ref}${f.version ? "@" + f.version : ""}`, c: "dim" });
@@ -865,13 +999,17 @@ export function estimateLayers(c: Config): LayerInfo[] {
       kind: "feature",
     });
   }
-  const apt = aptList(c);
-  if (apt.length) {
+  const img = imagePkgs(c);
+  const ess = essentialPkgs(c);
+  const extra = aptList(c);
+  if (img.length) {
     layers.push({
       id: "apt",
-      label: `RUN apt-get install ${apt.slice(0, 3).join(" ")}${apt.length > 3 ? " …" : ""}`,
-      detail: `${apt.length} extra package${apt.length > 1 ? "s" : ""} baked in via Dockerfile`,
-      mb: apt.length * 6,
+      label: `RUN apt-get install ${img.slice(0, 3).join(" ")}${img.length > 3 ? " …" : ""}`,
+      detail: ess.length
+        ? `${ess.length} essentials${extra.length ? ` + ${extra.length} project extras` : ""} pre-installed via Dockerfile`
+        : `${img.length} extra package${img.length > 1 ? "s" : ""} baked in via Dockerfile`,
+      mb: Math.round(ess.length * 3.5 + extra.length * 6),
       kind: "apt",
     });
   }
@@ -936,6 +1074,7 @@ export function loadConfig(): { cfg: Config; restored: boolean } {
       ...p,
       features: mergeList(DEFAULT_CONFIG.features, p.features),
       postSteps: mergeList(DEFAULT_CONFIG.postSteps, p.postSteps),
+      toolGroups: mergeList(DEFAULT_CONFIG.toolGroups, p.toolGroups),
       enforce: { ...DEFAULT_CONFIG.enforce, ...(p.enforce ?? {}) },
     };
     return { cfg, restored: true };

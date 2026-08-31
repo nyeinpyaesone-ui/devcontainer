@@ -27,6 +27,7 @@ import {
   byteSize,
   clearConfig,
   DEFAULT_CONFIG,
+  essentialPkgs,
   estimateSeconds,
   formatDuration,
   hasViolation,
@@ -182,6 +183,17 @@ export default function App() {
     setRunFailed(false);
   };
 
+  const patchToolGroup = (id: string, v: boolean) => {
+    setCfg((c) => ({
+      ...c,
+      toolGroups: c.toolGroups.map((g) => (g.id === id ? { ...g, on: v } : g)),
+    }));
+    setVerified(false);
+    setRunFailed(false);
+  };
+
+  const essCount = essentialPkgs(cfg).length;
+
   const policies = useMemo(() => policyMatrix(cfg), [cfg]);
   const enforcedCount = policies.filter((p) => p.status === "enforced").length;
 
@@ -239,12 +251,15 @@ export default function App() {
         ? `features: ${feats.map((f) => f.ref.split("/").pop() + (f.version ? "@" + f.version : "")).join(" · ")}`
         : "features: none selected",
       `forwarding :${cfg.ports.join(" :")} → localhost`,
+      essCount
+        ? `pre-install: ${essCount} essential pkgs → image layer`
+        : "pre-install: none — image ships bare",
       hasViolation(cfg)
         ? "⚠ policy P1: remoteUser=root — build will be refused"
         : `policy: ${enforcedCount}/5 gates enforced · CI gate armed`,
       "spec devcontainers/v0.245.2 · schema valid",
     ],
-    [img, arts.setup, feats, cfg.ports, cfg, enforcedCount]
+    [img, arts.setup, feats, cfg.ports, cfg, enforcedCount, essCount]
   );
 
   return (
@@ -460,6 +475,12 @@ export default function App() {
                 </div>
               )}
               <Switch
+                on={cfg.cloneRepo}
+                onChange={(v) => patch({ cloneRepo: v })}
+                label="git clone the repo during setup"
+                desc={`Shallow clone into ./${cfg.repo} — off means an existing workspace is required`}
+              />
+              <Switch
                 on={cfg.namedVolume}
                 onChange={(v) => patch({ namedVolume: v })}
                 label="Named volume for node_modules"
@@ -516,8 +537,59 @@ export default function App() {
             </Section>
           </Reveal>
 
+          <Reveal delay={140}>
+            <Section
+              index="04"
+              title="Essential tooling"
+              hint={`${essCount} pkgs pre-installed`}
+            >
+              <div className="space-y-2">
+                {cfg.toolGroups.map((g) => (
+                  <Switch
+                    key={g.id}
+                    on={g.on}
+                    onChange={(v) => patchToolGroup(g.id, v)}
+                    label={g.label}
+                    desc={g.desc}
+                    right={
+                      <span
+                        className={`shrink-0 font-mono text-[10px] px-2 py-1 rounded-md border transition-colors ${
+                          g.on
+                            ? "border-lagoon-500/40 text-lagoon-300 bg-lagoon-500/[0.08]"
+                            : "border-ink-600 text-mist-600"
+                        }`}
+                      >
+                        {g.pkgs.length} pkgs
+                      </span>
+                    }
+                  />
+                ))}
+              </div>
+              {essCount > 0 ? (
+                <div className="flex flex-wrap gap-1.5 rounded-lg border border-ink-700/70 bg-ink-950/50 px-3 py-2.5">
+                  {essentialPkgs(cfg).map((p) => (
+                    <code
+                      key={p}
+                      className="chip-in font-mono text-[10.5px] text-mist-300 bg-ink-800/80 border border-ink-700/80 rounded px-1.5 py-0.5 transition-colors hover:border-lagoon-500/50 hover:text-lagoon-300"
+                    >
+                      {p}
+                    </code>
+                  ))}
+                </div>
+              ) : (
+                <p className="font-mono text-[10.5px] text-coral-400/90">
+                  ▲ no tool groups enabled — the workspace image ships bare
+                </p>
+              )}
+              <p className="font-mono text-[10.5px] text-mist-600 leading-relaxed">
+                baked into <span className="text-mist-300">.devcontainer/Dockerfile</span> — installed
+                once at build time, <span className="text-mist-300">0s</span> on every reopen
+              </p>
+            </Section>
+          </Reveal>
+
           <Reveal delay={160}>
-            <Section index="04" title="Network" hint={`${cfg.ports.length} ports`}>
+            <Section index="05" title="Network" hint={`${cfg.ports.length} ports`}>
               <span className="block text-[10.5px] uppercase tracking-[0.14em] text-mist-600 font-mono mb-1.5">
                 forwarded ports
               </span>
@@ -531,7 +603,7 @@ export default function App() {
           </Reveal>
 
           <Reveal delay={200}>
-            <Section index="05" title="Editor & bootstrap">
+            <Section index="06" title="Editor & bootstrap">
               <span className="block text-[10.5px] uppercase tracking-[0.14em] text-mist-600 font-mono mb-1.5">
                 VS Code extensions
               </span>
@@ -569,7 +641,7 @@ export default function App() {
           </Reveal>
 
           <Reveal delay={220}>
-            <Section index="06" title="Enforcement" hint={`${enforcedCount}/5 gates`}>
+            <Section index="07" title="Enforcement" hint={`${enforcedCount}/5 gates`}>
               {(
                 [
                   {
@@ -716,7 +788,7 @@ export default function App() {
                     {
                       n: "1",
                       t: "Bootstrap",
-                      d: "Run the script at the repo root — it pulls the GHCR image, scaffolds .devcontainer/ and writes both configs.",
+                      d: "Run the script — it clones the repo, pulls the GHCR image and writes .devcontainer/ with the pre-install Dockerfile.",
                       c: "text-ember-400",
                       cmd: "./setup-env.sh",
                     },
