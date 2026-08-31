@@ -14,6 +14,7 @@ import {
   Reveal,
   Section,
   Select,
+  Sparkline,
   Switch,
   TextField,
   copyText,
@@ -145,7 +146,7 @@ export default function App() {
   // Heavy generation runs in the forge worker (a background "backend");
   // the main thread only renders the resulting bundle.
   const backend = useForgeBackend(cfg);
-  const { bundle, status, ms, cacheHits, workerOk } = backend;
+  const { bundle, status, ms, cacheHits, workerOk, times } = backend;
   const arts = bundle.arts;
   const runLines = bundle.runLines;
   const img = imageRef(cfg);
@@ -188,6 +189,15 @@ export default function App() {
     setCfg((c) => ({
       ...c,
       toolGroups: c.toolGroups.map((g) => (g.id === id ? { ...g, on: v } : g)),
+    }));
+    setVerified(false);
+    setRunFailed(false);
+  };
+
+  const patchLang = (id: string, p: Partial<{ on: boolean; version: string }>) => {
+    setCfg((c) => ({
+      ...c,
+      langs: c.langs.map((l) => (l.id === id ? { ...l, ...p } : l)),
     }));
     setVerified(false);
     setRunFailed(false);
@@ -254,6 +264,12 @@ export default function App() {
       essCount
         ? `pre-install: ${essCount} essential pkgs → image layer`
         : "pre-install: none — image ships bare",
+      bundle.langCount
+        ? `toolchains: ${cfg.langs
+            .filter((l) => l.on)
+            .map((l) => `${l.label.toLowerCase()} ${l.version}`)
+            .join(" · ")}`
+        : "toolchains: none pinned",
       hasViolation(cfg)
         ? "⚠ policy P1: remoteUser=root — build will be refused"
         : `policy: ${enforcedCount}/5 gates enforced · CI gate armed`,
@@ -360,6 +376,7 @@ export default function App() {
               <span className="text-mist-600 tabular-nums">
                 {ms > 0.05 ? `${ms.toFixed(1)}ms` : "cached"} · {cacheHits} hits
               </span>
+              <Sparkline values={times} className="w-14 h-4 text-lagoon-400" />
             </span>
 
             <button
@@ -616,8 +633,64 @@ export default function App() {
             </Section>
           </Reveal>
 
+          <Reveal delay={150}>
+            <Section index="05" title="Language toolchains" hint={`${bundle.langCount} pinned`}>
+              <div className="space-y-2">
+                {cfg.langs.map((l) => (
+                  <Switch
+                    key={l.id}
+                    on={l.on}
+                    onChange={(v) => patchLang(l.id, { on: v })}
+                    label={l.label}
+                    desc={l.desc}
+                    right={
+                      l.on ? (
+                        <span className="flex items-center gap-1.5 shrink-0" onClick={(e) => e.stopPropagation()}>
+                          <span className="font-mono text-[9.5px] uppercase tracking-wider px-1.5 py-1 rounded border border-coral-500/40 text-coral-300 bg-coral-500/[0.08]">
+                            {l.via}
+                          </span>
+                          <span className="w-[92px]">
+                            <Select
+                              ariaLabel={`${l.label} version`}
+                              value={l.version}
+                              onChange={(v) => patchLang(l.id, { version: v })}
+                              options={l.versions.map((v) => ({ value: v, label: v }))}
+                            />
+                          </span>
+                        </span>
+                      ) : undefined
+                    }
+                  />
+                ))}
+              </div>
+              {bundle.langCount > 0 ? (
+                <div className="flex flex-wrap gap-1.5 rounded-lg border border-ink-700/70 bg-ink-950/50 px-3 py-2.5">
+                  {cfg.langs
+                    .filter((l) => l.on)
+                    .map((l) => (
+                      <code
+                        key={l.id}
+                        className="font-mono text-[10.5px] text-coral-300 bg-ink-800/80 border border-coral-500/25 rounded px-1.5 py-0.5 transition-colors hover:border-coral-500/60"
+                      >
+                        {l.label.toLowerCase()} {l.version}
+                      </code>
+                    ))}
+                </div>
+              ) : (
+                <p className="font-mono text-[10.5px] text-mist-600">
+                  nothing pinned — the node feature remains the only runtime
+                </p>
+              )}
+              <p className="font-mono text-[10.5px] text-mist-600 leading-relaxed">
+                each chain auto-provisions at build time via{" "}
+                <span className="text-mist-300">rustup · tarball · pyenv · apt</span> — verified by{" "}
+                <span className="text-mist-300">quickstart.sh</span> on every start
+              </p>
+            </Section>
+          </Reveal>
+
           <Reveal delay={160}>
-            <Section index="05" title="Network" hint={`${cfg.ports.length} ports`}>
+            <Section index="06" title="Network" hint={`${cfg.ports.length} ports`}>
               <span className="block text-[10.5px] uppercase tracking-[0.14em] text-mist-600 font-mono mb-1.5">
                 forwarded ports
               </span>
@@ -631,7 +704,7 @@ export default function App() {
           </Reveal>
 
           <Reveal delay={200}>
-            <Section index="06" title="Editor & bootstrap">
+            <Section index="07" title="Editor & bootstrap">
               <span className="block text-[10.5px] uppercase tracking-[0.14em] text-mist-600 font-mono mb-1.5">
                 VS Code extensions
               </span>
@@ -669,7 +742,7 @@ export default function App() {
           </Reveal>
 
           <Reveal delay={220}>
-            <Section index="07" title="Enforcement" hint={`${enforcedCount}/5 gates`}>
+            <Section index="08" title="Enforcement" hint={`${enforcedCount}/5 gates`}>
               {(
                 [
                   {
@@ -723,12 +796,18 @@ export default function App() {
                 </span>
                 <span className="font-mono text-[10.5px] text-lagoon-400">● regenerating</span>
               </div>
-              <div className="grid grid-cols-3 gap-3">
+              <div className="grid grid-cols-4 gap-3">
                 <div>
                   <div key={countLines(arts.setup)} className="stat-flash font-display font-bold text-xl text-mist-100">
                     {countLines(arts.setup)}
                   </div>
                   <div className="font-mono text-[10px] text-mist-600 uppercase tracking-wider">script lines</div>
+                </div>
+                <div>
+                  <div key={bundle.langCount} className="stat-flash font-display font-bold text-xl text-coral-400">
+                    {bundle.langCount}
+                  </div>
+                  <div className="font-mono text-[10px] text-mist-600 uppercase tracking-wider">toolchains</div>
                 </div>
                 <div>
                   <div key={feats.length} className="stat-flash font-display font-bold text-xl text-mist-100">
@@ -867,7 +946,7 @@ export default function App() {
         <div className="max-w-[1480px] mx-auto px-4 sm:px-6 py-3.5 flex flex-wrap items-center gap-x-6 gap-y-1.5 font-mono text-[11px] text-mist-600">
           <span className="flex items-center gap-2">
             <span className="led-live w-1.5 h-1.5 rounded-full bg-lagoon-400" />
-            forge v1.6.0 · spec devcontainers/v0.245.2 · policy gates P1–P5
+            forge v1.7.0 · spec devcontainers/v0.245.2 · toolchains + policy gates P1–P5
           </span>
           <span className="hidden md:inline">manifest autosaves to this browser</span>
           <span className="sm:ml-auto flex items-center gap-2.5 min-w-0 max-w-full">

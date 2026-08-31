@@ -418,3 +418,38 @@ export function CountUp({
 export function Kbd({ children }: { children: ReactNode }) {
   return <kbd className="kbd">{children}</kbd>;
 }
+
+// ── latency sparkline ────────────────────────────────────────────────────────
+
+export function Sparkline({ values, className = "" }: { values: number[]; className?: string }) {
+  if (values.length < 2) {
+    return (
+      <svg viewBox="0 0 56 16" className={className} aria-hidden>
+        <line x1="1" y1="12" x2="55" y2="12" stroke="currentColor" strokeOpacity="0.25" strokeWidth="1.4" strokeDasharray="2 3" />
+      </svg>
+    );
+  }
+  const w = 56;
+  const h = 16;
+  const max = Math.max(...values, 1);
+  const pts = values.map((v, i) => {
+    const x = (i / (values.length - 1)) * (w - 2) + 1;
+    const y = h - 2 - (v / max) * (h - 5);
+    return `${x.toFixed(1)},${y.toFixed(1)}`;
+  });
+  const last = pts[pts.length - 1].split(",");
+  return (
+    <svg viewBox={`0 0 ${w} ${h}`} className={className} aria-hidden>
+      <polyline
+        points={pts.join(" ")}
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.4"
+        strokeLinejoin="round"
+        strokeLinecap="round"
+        strokeOpacity="0.85"
+      />
+      <circle cx={last[0]} cy={last[1]} r="1.8" fill="currentColor" />
+    </svg>
+  );
+}

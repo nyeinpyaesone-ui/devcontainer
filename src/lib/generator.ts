@@ -496,7 +496,7 @@ export function buildDevcontainerJson(c: Config): string {
   const doc: Record<string, unknown> = {
     name: `${c.repo} · ${c.owner}`,
   };
-  if (imagePkgs(c).length) {
+  if (imagePkgs(c).length || activeLangs(c).length) {
     doc.build = { dockerfile: "Dockerfile", args: { BASE_IMAGE: imageRef(c) } };
   } else {
     doc.image = imageRef(c);
@@ -567,6 +567,14 @@ export function buildDockerfile(c: Config): string {
       ``
     );
   }
+
+  // automated language toolchains — each pinned & provisioned at build time
+  const langs = activeLangs(c);
+  if (langs.length) {
+    lines.push(`# ── automated language toolchains (pinned at build time) ────────────`);
+    for (const l of langs) lines.push(...langInstallLines(l, c));
+  }
+
   lines.push(
     `# keep the container shell consistent with the host profile`,
     `ENV SHELL=/usr/bin/${c.shell} \\`,
@@ -689,11 +697,12 @@ export function buildSetupScript(c: Config, json: string, dockerfile: string): s
   );
 
   const imgPkgs = imagePkgs(c);
-  if (imgPkgs.length) {
+  const langs = activeLangs(c);
+  if (imgPkgs.length || langs.length) {
     const ess = essentialPkgs(c);
     push(
       `# ── step 6 · write extending Dockerfile (pre-installed tooling) ─────`,
-      `log "writing .devcontainer/Dockerfile — ${imgPkgs.length} packages pre-installed into the image"`,
+      `log "writing .devcontainer/Dockerfile — ${imgPkgs.length} packages${langs.length ? ` + ${langs.length} toolchain${langs.length > 1 ? "s" : ""}` : ""} pre-installed into the image"`,
       `cat > "\${DEVCONTAINER_DIR}/Dockerfile" <<'DEVCONTAINER_DOCKERFILE'`,
       dockerfile,
       `DEVCONTAINER_DOCKERFILE`,
@@ -880,6 +889,15 @@ export function buildQuickstart(c: Config): string {
     ``,
     `# 5 · verify the forwarded ports once the container is up`,
     ...c.ports.map((p) => `curl -fsS http://localhost:${p} >/dev/null && echo "port ${p} ✔"`),
+    ...(activeLangs(c).length
+      ? [
+          ``,
+          `# 6 · verify the automated toolchains (pinned at build time)`,
+          ...activeLangs(c).map(
+            (l) => `${l.verify} && echo "${l.label.toLowerCase()} ${l.version} ✔"`
+          ),
+        ]
+      : []),
     ``,
   ].join("\n");
 }
@@ -997,6 +1015,7 @@ export interface ForgeBundle {
   estSeconds: number;
   essentialCount: number;
   enforcedCount: number;
+  langCount: number;
 }
 
 export function computeBundle(c: Config): ForgeBundle {
@@ -1012,6 +1031,7 @@ export function computeBundle(c: Config): ForgeBundle {
     estSeconds: estimateSeconds(c),
     essentialCount: essentialPkgs(c).length,
     enforcedCount: policies.filter((p) => p.status === "enforced").length,
+    langCount: activeLangs(c).length,
   };
 }
 
@@ -1029,6 +1049,7 @@ export function estimateSeconds(c: Config): number {
   const pkgs = aptList(c).length;
   if (pkgs) s += 16 + pkgs * 2;
   if (essentialPkgs(c).length) s += 24;
+  s += activeLangs(c).length * 34; // rustup/pyenv/tarballs are the slow part
   if (c.smokeTest) s += 7;
   if (Object.values(c.enforce).some(Boolean)) s += 8;
   return s;
@@ -1098,6 +1119,13 @@ export function buildRunLines(c: Config, arts: Artifacts): RunLine[] {
     }
     lines.push({ t: `✔ ${all.length} packages will be baked in on first build`, c: "ok" });
   }
+  if (activeLangs(c).length) {
+    lines.push({ t: `▸ provisioning language toolchains`, c: "log" });
+    for (const l of activeLangs(c)) {
+      lines.push({ t: `  • ${l.label.toLowerCase()} ${l.version} via ${l.via}`, c: "dim" });
+    }
+    lines.push({ t: `✔ ${activeLangs(c).length} toolchain${activeLangs(c).length > 1 ? "s" : ""} pinned in the image`, c: "ok" });
+  }
   for (const f of feats) {
     lines.push({ t: `  • ${f.ref}${f.version ? "@" + f.version : ""}`, c: "dim" });
   }
@@ -1159,7 +1187,7 @@ export interface LayerInfo {
   label: string;
   detail: string;
   mb: number;
-  kind: "base" | "feature" | "apt" | "mount";
+  kind: "base" | "feature" | "apt" | "lang" | "mount";
 }
 
 const BASE_MB: Record<string, number> = {
@@ -1208,6 +1236,18 @@ export function estimateLayers(c: Config): LayerInfo[] {
         : `${img.length} extra package${img.length > 1 ? "s" : ""} baked in via Dockerfile`,
       mb: Math.round(ess.length * 3.5 + extra.length * 6),
       kind: "apt",
+    });
+  }
+  const tc = activeLangs(c);
+  if (tc.length) {
+    layers.push({
+      id: "langs",
+      label: `RUN provision ${tc.map((l) => l.label.toLowerCase()).join(" + ")}`,
+      detail: tc
+        .map((l) => `${l.label} ${l.version} via ${l.via}`)
+        .join(" · "),
+      mb: tc.reduce((a, l) => a + (l.id === "python" ? 240 : l.id === "rust" ? 310 : l.id === "go" ? 160 : l.id === "java" ? 280 : l.id === "dotnet" ? 210 : 90), 0),
+      kind: "lang",
     });
   }
   if (c.namedVolume) {
@@ -1272,6 +1312,7 @@ export function loadConfig(): { cfg: Config; restored: boolean } {
       features: mergeList(DEFAULT_CONFIG.features, p.features),
       postSteps: mergeList(DEFAULT_CONFIG.postSteps, p.postSteps),
       toolGroups: mergeList(DEFAULT_CONFIG.toolGroups, p.toolGroups),
+      langs: mergeList(DEFAULT_CONFIG.langs, p.langs),
       enforce: { ...DEFAULT_CONFIG.enforce, ...(p.enforce ?? {}) },
     };
     return { cfg, restored: true };

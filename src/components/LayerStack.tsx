@@ -11,6 +11,7 @@ const KIND_STYLE: Record<LayerInfo["kind"], { bar: string; text: string; tick: s
   base: { bar: "bg-ember-500/75", text: "text-ember-300", tick: "bg-ember-500" },
   feature: { bar: "bg-lagoon-500/75", text: "text-lagoon-300", tick: "bg-lagoon-500" },
   apt: { bar: "bg-skyx-400/75", text: "text-skyx-300", tick: "bg-skyx-400" },
+  lang: { bar: "bg-coral-500/75", text: "text-coral-300", tick: "bg-coral-500" },
   mount: { bar: "bg-mist-500/40", text: "text-mist-400", tick: "bg-mist-500" },
 };
 

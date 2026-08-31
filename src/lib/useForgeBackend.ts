@@ -21,6 +21,8 @@ export interface BackendState {
   ms: number;
   cacheHits: number;
   workerOk: boolean;
+  /** rolling window of recent compile latencies (ms) for the sparkline */
+  times: number[];
 }
 
 const keyOf = (c: Config) => shortHash(JSON.stringify(c));
@@ -32,6 +34,8 @@ export function useForgeBackend(cfg: Config): BackendState {
   const [ms, setMs] = useState(0);
   const [cacheHits, setCacheHits] = useState(0);
   const [workerOk, setWorkerOk] = useState(true);
+  const [times, setTimes] = useState<number[]>([]);
+  const recordTime = (v: number) => setTimes((t) => [...t.slice(-15), Math.max(v, 0.1)]);
 
   const workerRef = useRef<Worker | null>(null);
   const workerFailedRef = useRef(false);
@@ -64,6 +68,7 @@ export function useForgeBackend(cfg: Config): BackendState {
         cacheRef.current.set(keyOf(lastCfgRef.current), res.bundle);
         setBundle(res.bundle);
         setMs(res.ms);
+        recordTime(res.ms);
         setStatus("ready");
       };
       workerRef.current = w;
@@ -81,8 +86,10 @@ export function useForgeBackend(cfg: Config): BackendState {
     const t0 = performance.now();
     const b = computeBundle(lastCfgRef.current);
     cacheRef.current.set(keyOf(lastCfgRef.current), b);
+    const dt = performance.now() - t0;
     setBundle(b);
-    setMs(performance.now() - t0);
+    setMs(dt);
+    recordTime(dt);
     setStatus("ready");
   };
 
@@ -112,5 +119,5 @@ export function useForgeBackend(cfg: Config): BackendState {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cfg]);
 
-  return { bundle, status, ms, cacheHits, workerOk };
+  return { bundle, status, ms, cacheHits, workerOk, times };
 }
