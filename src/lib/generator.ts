@@ -37,6 +37,17 @@ export interface ToolGroup {
   pkgs: string[];
 }
 
+export interface LangChain {
+  id: "rust" | "go" | "python" | "java" | "dotnet" | "php" | "ruby";
+  label: string;
+  desc: string;
+  via: string; // provisioning method badge
+  on: boolean;
+  version: string;
+  versions: string[];
+  verify: string; // smoke command run inside the container
+}
+
 export interface Config {
   owner: string;
   repo: string;
@@ -49,6 +60,7 @@ export interface Config {
   extensions: string[];
   postSteps: PostStep[];
   toolGroups: ToolGroup[];
+  langs: LangChain[];
   namedVolume: boolean;
   smokeTest: boolean;
   cloneRepo: boolean;
@@ -188,6 +200,78 @@ export const DEFAULT_CONFIG: Config = {
       pkgs: ["dnsutils", "iputils-ping", "netcat-openbsd", "iproute2", "openssl", "lsof"],
     },
   ],
+  langs: [
+    {
+      id: "rust",
+      label: "Rust",
+      desc: "rustup profile=minimal + rustfmt + clippy",
+      via: "rustup",
+      on: true,
+      version: "stable",
+      versions: ["stable", "1.83.0", "1.75.0"],
+      verify: "rustc --version",
+    },
+    {
+      id: "go",
+      label: "Go",
+      desc: "official linux-amd64 tarball → /usr/local/go",
+      via: "tarball",
+      on: true,
+      version: "1.23.4",
+      versions: ["1.23.4", "1.22.10", "1.21.13"],
+      verify: "go version",
+    },
+    {
+      id: "python",
+      label: "Python",
+      desc: "pyenv compile & pin — advanced alt to the apt feature",
+      via: "pyenv",
+      on: false,
+      version: "3.13.1",
+      versions: ["3.13.1", "3.12.8", "3.11.11"],
+      verify: "python --version",
+    },
+    {
+      id: "java",
+      label: "Java",
+      desc: "OpenJDK headless + JAVA_HOME export",
+      via: "apt",
+      on: false,
+      version: "21",
+      versions: ["21", "17"],
+      verify: "java -version",
+    },
+    {
+      id: "dotnet",
+      label: ".NET",
+      desc: "dotnet-install.sh SDK channel → /usr/local/dotnet",
+      via: "script",
+      on: false,
+      version: "9.0",
+      versions: ["9.0", "8.0"],
+      verify: "dotnet --version",
+    },
+    {
+      id: "php",
+      label: "PHP",
+      desc: "php-cli + extensions + composer installer",
+      via: "apt",
+      on: false,
+      version: "8.3",
+      versions: ["8.3", "8.2"],
+      verify: "php --version",
+    },
+    {
+      id: "ruby",
+      label: "Ruby",
+      desc: "ruby-full + dev headers for native gems",
+      via: "apt",
+      on: false,
+      version: "3.2",
+      versions: ["3.2", "3.1"],
+      verify: "ruby --version",
+    },
+  ],
   namedVolume: true,
   smokeTest: true,
   cloneRepo: true,
@@ -245,6 +329,90 @@ export function imagePkgs(c: Config): string[] {
     }
   }
   return out;
+}
+
+export const activeLangs = (c: Config) => c.langs.filter((l) => l.on);
+
+/** Dockerfile automation for one pinned toolchain — runs as root during build */
+export function langInstallLines(l: LangChain, c: Config): string[] {
+  const v = l.version;
+  const home = `/home/${c.remoteUser}`;
+  switch (l.id) {
+    case "rust":
+      return [
+        `# ── rust · automated via rustup (${v}) ────────────────────────────`,
+        `RUN curl -fsSL https://sh.rustup.rs \\`,
+        `      | sh -s -- -y --profile minimal --default-toolchain ${v} \\`,
+        `            --component rustfmt --component clippy`,
+        `ENV PATH="${home}/.cargo/bin:\${PATH}" \\`,
+        `    CARGO_NET_GIT_FETCH_WITH_CLI="true"`,
+        ``,
+      ];
+    case "go":
+      return [
+        `# ── go · official tarball (v${v}) ────────────────────────────────`,
+        `RUN curl -fsSL "https://go.dev/dl/go${v}.linux-amd64.tar.gz" \\`,
+        `      | tar -C /usr/local -xz`,
+        `ENV PATH="/usr/local/go/bin:${home}/go/bin:\${PATH}" \\`,
+        `    GOPATH="${home}/go"`,
+        ``,
+      ];
+    case "python":
+      return [
+        `# ── python · pyenv compile & pin (${v}) ──────────────────────────`,
+        `RUN apt-get update \\`,
+        `    && apt-get install -y --no-install-recommends \\`,
+        `       libssl-dev zlib1g-dev libbz2-dev libreadline-dev \\`,
+        `       libsqlite3-dev libffi-dev liblzma-dev \\`,
+        `    && git clone --depth 1 https://github.com/pyenv/pyenv.git /opt/pyenv \\`,
+        `    && PYENV_ROOT=/opt/pyenv /opt/pyenv/bin/pyenv install -s ${v} \\`,
+        `    && PYENV_ROOT=/opt/pyenv /opt/pyenv/bin/pyenv global ${v} \\`,
+        `    && rm -rf /var/lib/apt/lists/*`,
+        `ENV PYENV_ROOT="/opt/pyenv" \\`,
+        `    PATH="/opt/pyenv/shims:/opt/pyenv/bin:\${PATH}"`,
+        ``,
+      ];
+    case "java":
+      return [
+        `# ── java · OpenJDK ${v} via apt ─────────────────────────────────`,
+        `RUN apt-get update \\`,
+        `    && apt-get install -y --no-install-recommends openjdk-${v}-jdk-headless \\`,
+        `    && rm -rf /var/lib/apt/lists/*`,
+        `ENV JAVA_HOME="/usr/lib/jvm/java-${v}-openjdk-amd64" \\`,
+        `    PATH="\${JAVA_HOME}/bin:\${PATH}"`,
+        ``,
+      ];
+    case "dotnet":
+      return [
+        `# ── .NET · dotnet-install.sh (channel ${v}) ──────────────────────`,
+        `RUN curl -fsSL https://dot.net/v1/dotnet-install.sh \\`,
+        `      | bash -s -- --channel ${v} --install-dir /usr/local/dotnet`,
+        `ENV DOTNET_ROOT="/usr/local/dotnet" \\`,
+        `    PATH="/usr/local/dotnet:\${PATH}" \\`,
+        `    DOTNET_CLI_TELEMETRY_OPTOUT="1"`,
+        ``,
+      ];
+    case "php":
+      return [
+        `# ── php · apt + composer (${v}) ──────────────────────────────────`,
+        `RUN apt-get update \\`,
+        `    && apt-get install -y --no-install-recommends \\`,
+        `       php${v}-cli php${v}-xml php${v}-mbstring php${v}-curl php${v}-zip \\`,
+        `    && curl -fsSL https://getcomposer.org/installer \\`,
+        `      | php -- --install-dir=/usr/local/bin --filename=composer \\`,
+        `    && rm -rf /var/lib/apt/lists/*`,
+        ``,
+      ];
+    case "ruby":
+      return [
+        `# ── ruby · apt (${v}) ────────────────────────────────────────────`,
+        `RUN apt-get update \\`,
+        `    && apt-get install -y --no-install-recommends \\`,
+        `       ruby-full ruby-dev build-essential \\`,
+        `    && rm -rf /var/lib/apt/lists/*`,
+        ``,
+      ];
+  }
 }
 
 export function postCreateCommand(c: Config): string | null {
