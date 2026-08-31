@@ -90,11 +90,23 @@ const YAML_GROUPS: (string | null)[] = [
   "tk-n", // 8 number
 ];
 
+// Bounded memoization: identical (lang, line) pairs tokenize once. Lines are
+// immutable strings, so this is safe; we cap the cache to bound memory.
+const hlCache = new Map<string, ReactNode>();
+const HL_CACHE_MAX = 6000;
+
 export function highlightLine(line: string, lang: Lang): ReactNode {
-  if (lang === "json") return tokenize(line, JSON_RE, JSON_GROUPS);
-  if (lang === "dockerfile") return tokenize(line, DOCKER_RE, DOCKER_GROUPS);
-  if (lang === "yaml") return tokenize(line, YAML_RE, YAML_GROUPS);
-  return tokenize(line, BASH_RE, BASH_GROUPS);
+  const key = lang + "\u0000" + line;
+  const hit = hlCache.get(key);
+  if (hit !== undefined) return hit;
+  let node: ReactNode;
+  if (lang === "json") node = tokenize(line, JSON_RE, JSON_GROUPS);
+  else if (lang === "dockerfile") node = tokenize(line, DOCKER_RE, DOCKER_GROUPS);
+  else if (lang === "yaml") node = tokenize(line, YAML_RE, YAML_GROUPS);
+  else node = tokenize(line, BASH_RE, BASH_GROUPS);
+  if (hlCache.size >= HL_CACHE_MAX) hlCache.clear();
+  hlCache.set(key, node);
+  return node;
 }
 
 export function countLines(s: string): number {

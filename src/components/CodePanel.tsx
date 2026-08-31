@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { countLines, highlightLine, type Lang } from "../lib/highlight";
 import { byteSize, shortHash } from "../lib/generator";
 import {
@@ -16,6 +16,10 @@ export interface FileTab {
   badge: string;
   content: string;
 }
+
+// Fixed row height (matches leading-[20px]) — the basis for line windowing.
+const LINE_H = 20;
+const OVERSCAN = 14;
 
 function useCopied() {
   const [copied, setCopied] = useState<string | null>(null);
@@ -42,6 +46,41 @@ export default function CodePanel({
 
   const lines = useMemo(() => file.content.split("\n"), [file.content]);
   const hash = useMemo(() => shortHash(file.content), [file.content]);
+
+  // ── line windowing: only render rows inside (or near) the viewport ─────
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const rafRef = useRef(0);
+  const [scrollTop, setScrollTop] = useState(0);
+  const [viewH, setViewH] = useState(480);
+
+  useEffect(() => {
+    // The scroll container remounts per file (scrollTop resets) — keep state in sync.
+    setScrollTop(0);
+    const el = scrollRef.current;
+    if (el) setViewH(el.clientHeight);
+    const onResize = () => {
+      if (scrollRef.current) setViewH(scrollRef.current.clientHeight);
+    };
+    window.addEventListener("resize", onResize);
+    return () => {
+      window.removeEventListener("resize", onResize);
+      cancelAnimationFrame(rafRef.current);
+    };
+  }, [file.name]);
+
+  const onScroll = () => {
+    cancelAnimationFrame(rafRef.current);
+    rafRef.current = requestAnimationFrame(() => {
+      if (scrollRef.current) setScrollTop(scrollRef.current.scrollTop);
+    });
+  };
+
+  const total = lines.length;
+  const start = Math.max(0, Math.floor(scrollTop / LINE_H) - OVERSCAN);
+  const end = Math.min(total, start + Math.ceil(viewH / LINE_H) + OVERSCAN * 2);
+  const topPad = start * LINE_H;
+  const bottomPad = (total - end) * LINE_H;
+  const visible = lines.slice(start, end);
 
   const doCopy = async (id: string, text: string, label: string) => {
     if (await copyText(text)) {
@@ -119,28 +158,42 @@ export default function CodePanel({
         </div>
       </div>
 
-      {/* code body */}
+      {/* code body — virtualized: only the visible window of lines renders */}
       <div
         key={file.name}
+        ref={scrollRef}
+        onScroll={onScroll}
         className="code-in code-scroll scanlines overflow-auto max-h-[56vh] min-h-[380px] lg:max-h-[calc(100vh-330px)] bg-ink-950/60"
       >
-        <pre className="flex text-[12.5px] leading-[1.62] font-mono py-3">
+        <pre className="flex text-[12.5px] leading-[20px] font-mono py-3">
           <div
             aria-hidden
             className="select-none sticky left-0 shrink-0 border-r border-ink-700/60 bg-ink-950/90 px-3 text-right text-mist-600/70"
           >
-            {lines.map((_, i) => (
-              <div key={i}>{i + 1}</div>
+            <div style={{ height: topPad }} />
+            {visible.map((_, i) => (
+              <div key={start + i} style={{ height: LINE_H }}>
+                {start + i + 1}
+              </div>
             ))}
-            <div className="text-ink-700">·</div>
+            <div style={{ height: bottomPad }} />
+            <div className="text-ink-700" style={{ height: LINE_H }}>
+              ·
+            </div>
           </div>
           <code className="px-4 whitespace-pre text-mist-300">
-            {lines.map((ln, i) => (
-              <div key={i} className="hover:bg-skyx-400/[0.04]">
+            <div style={{ height: topPad }} />
+            {visible.map((ln, i) => (
+              <div
+                key={start + i}
+                style={{ height: LINE_H }}
+                className="hover:bg-skyx-400/[0.04]"
+              >
                 {highlightLine(ln, file.lang) || " "}
               </div>
             ))}
-            <div>
+            <div style={{ height: bottomPad }} />
+            <div style={{ height: LINE_H }}>
               <span className="caret inline-block w-[7px] h-[15px] translate-y-[2px] bg-ember-500/90" />
             </div>
           </code>

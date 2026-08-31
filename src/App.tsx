@@ -22,24 +22,21 @@ import {
 import {
   activeFeatures,
   bootstrapLine,
-  buildArtifacts,
-  buildRunLines,
   byteSize,
   clearConfig,
   DEFAULT_CONFIG,
   essentialPkgs,
-  estimateSeconds,
   formatDuration,
   hasViolation,
   imageRef,
   loadConfig,
-  policyMatrix,
   saveConfig,
   shortHash,
   type Config,
   type Enforcement,
 } from "./lib/generator";
 import { countLines } from "./lib/highlight";
+import { useForgeBackend } from "./lib/useForgeBackend";
 
 // ── typewriter ticker ────────────────────────────────────────────────────────
 
@@ -145,11 +142,15 @@ export default function App() {
   const toastId = useRef(0);
   const announcedRestore = useRef(false);
 
-  const arts = useMemo(() => buildArtifacts(cfg), [cfg]);
-  const runLines = useMemo(() => buildRunLines(cfg, arts), [cfg, arts]);
+  // Heavy generation runs in the forge worker (a background "backend");
+  // the main thread only renders the resulting bundle.
+  const backend = useForgeBackend(cfg);
+  const { bundle, status, ms, cacheHits, workerOk } = backend;
+  const arts = bundle.arts;
+  const runLines = bundle.runLines;
   const img = imageRef(cfg);
   const feats = activeFeatures(cfg);
-  const est = estimateSeconds(cfg);
+  const est = bundle.estSeconds;
 
   const toast = (msg: string) => {
     const id = ++toastId.current;
@@ -192,10 +193,9 @@ export default function App() {
     setRunFailed(false);
   };
 
-  const essCount = essentialPkgs(cfg).length;
-
-  const policies = useMemo(() => policyMatrix(cfg), [cfg]);
-  const enforcedCount = policies.filter((p) => p.status === "enforced").length;
+  const essCount = bundle.essentialCount;
+  const policies = bundle.policies;
+  const enforcedCount = bundle.enforcedCount;
 
   const files: FileTab[] = [
     { name: "setup-env.sh", lang: "bash", badge: "sh", content: arts.setup },
@@ -332,6 +332,34 @@ export default function App() {
                 }`}
               />
               {verified ? "dry-run passed" : runFailed ? "dry-run failed" : "unverified"}
+            </span>
+
+            {/* backend telemetry — generation runs in a worker off the main thread */}
+            <span
+              title={
+                workerOk
+                  ? "forge worker backend — artifacts computed off the main thread"
+                  : "worker unavailable — computing on the main thread"
+              }
+              className={`hidden md:flex items-center gap-2 font-mono text-[10.5px] px-2.5 py-1.5 rounded-lg border transition-colors ${
+                status === "compiling"
+                  ? "border-skyx-400/45 text-skyx-300 bg-skyx-400/[0.07]"
+                  : "border-ink-600 text-mist-500 bg-ink-900/60"
+              }`}
+            >
+              <span
+                className={`w-1.5 h-1.5 rounded-full ${
+                  status === "compiling"
+                    ? "bg-skyx-400 led-live"
+                    : workerOk
+                      ? "bg-lagoon-400"
+                      : "bg-ember-500/80"
+                }`}
+              />
+              {status === "compiling" ? "compiling…" : workerOk ? "worker" : "main"}
+              <span className="text-mist-600 tabular-nums">
+                {ms > 0.05 ? `${ms.toFixed(1)}ms` : "cached"} · {cacheHits} hits
+              </span>
             </span>
 
             <button

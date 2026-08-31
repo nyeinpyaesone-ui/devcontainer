@@ -986,6 +986,35 @@ export function buildArtifacts(c: Config): Artifacts {
   };
 }
 
+// ── backend bundle (pure + serializable — safe to run in a worker) ──────────
+
+export interface ForgeBundle {
+  arts: Artifacts;
+  runLines: RunLine[];
+  policies: PolicyState[];
+  layers: LayerInfo[];
+  totalMb: number;
+  estSeconds: number;
+  essentialCount: number;
+  enforcedCount: number;
+}
+
+export function computeBundle(c: Config): ForgeBundle {
+  const arts = buildArtifacts(c);
+  const layers = estimateLayers(c);
+  const policies = policyMatrix(c);
+  return {
+    arts,
+    runLines: buildRunLines(c, arts),
+    policies,
+    layers,
+    totalMb: totalLayerMb(layers),
+    estSeconds: estimateSeconds(c),
+    essentialCount: essentialPkgs(c).length,
+    enforcedCount: policies.filter((p) => p.status === "enforced").length,
+  };
+}
+
 // ── stats ────────────────────────────────────────────────────────────────────
 
 export function estimateSeconds(c: Config): number {
