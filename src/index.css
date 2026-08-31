@@ -159,6 +159,12 @@ body {
 }
 .led-live { animation: led-pulse 2s ease-out infinite; }
 
+@keyframes violation-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(247, 92, 116, 0.5); }
+  50% { box-shadow: 0 0 0 6px rgba(247, 92, 116, 0); }
+}
+.violation-pulse { animation: violation-pulse 1.6s ease-out infinite; }
+
 @keyframes spin-slow { to { transform: rotate(360deg); } }
 .spin-slow { animation: spin-slow 14s linear infinite; }
 

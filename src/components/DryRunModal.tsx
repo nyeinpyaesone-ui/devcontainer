@@ -5,9 +5,10 @@ const LINE_COLOR: Record<RunLine["c"], string> = {
   cmd: "text-mist-100 font-semibold",
   log: "text-skyx-400",
   ok: "text-lagoon-400",
-  warn: "text-ember-400",
+  warn: "text-ember-500",
   dim: "text-mist-600",
   exit: "text-mist-300 font-semibold",
+  err: "text-coral-400 font-semibold",
 };
 
 export default function DryRunModal({
@@ -15,11 +16,13 @@ export default function DryRunModal({
   title,
   onClose,
   onDone,
+  failed = false,
 }: {
   lines: RunLine[];
   title: string;
   onClose: () => void;
   onDone: () => void;
+  failed?: boolean;
 }) {
   const [shown, setShown] = useState(0);
   const bodyRef = useRef<HTMLDivElement>(null);
@@ -82,7 +85,11 @@ export default function DryRunModal({
           </span>
           <span className="ml-auto font-mono text-[11px] text-mist-600">
             {done ? (
-              <span className="text-lagoon-400">exit 0</span>
+              failed ? (
+                <span className="text-coral-400">exit 1</span>
+              ) : (
+                <span className="text-lagoon-400">exit 0</span>
+              )
             ) : (
               `${pct}%`
             )}
@@ -102,7 +109,9 @@ export default function DryRunModal({
         {/* progress */}
         <div className="h-1 bg-ink-800">
           <div
-            className={`h-full bg-lagoon-500 transition-all duration-300 ${done ? "" : "bar-stripes"}`}
+            className={`h-full transition-all duration-300 ${failed ? "bg-coral-500" : "bg-lagoon-500"} ${
+              done ? "" : "bar-stripes"
+            }`}
             style={{ width: `${pct}%` }}
           />
         </div>
@@ -132,12 +141,19 @@ export default function DryRunModal({
             >
               skip animation ›
             </button>
+          ) : failed ? (
+            <span className="flex items-center gap-2 text-[12px] font-mono text-coral-400">
+              <svg viewBox="0 0 16 16" className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="1.8">
+                <path d="M3 3l10 10M13 3 3 13" strokeLinecap="round" />
+              </svg>
+              policy gate refused the build — fix the manifest
+            </span>
           ) : (
             <span className="flex items-center gap-2 text-[12px] font-mono text-lagoon-400">
               <svg viewBox="0 0 16 16" className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="1.8">
                 <path d="M3 8.5 6.5 12 13 4.5" strokeLinecap="round" strokeLinejoin="round" />
               </svg>
-              environment verified — script is safe to ship
+              environment verified — all policy gates green
             </span>
           )}
           <button

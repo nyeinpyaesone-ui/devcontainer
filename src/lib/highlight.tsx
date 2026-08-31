@@ -2,7 +2,7 @@ import type { ReactNode } from "react";
 
 // Lightweight line-based tokenizer → React spans. No innerHTML, no deps.
 
-export type Lang = "bash" | "json" | "dockerfile";
+export type Lang = "bash" | "json" | "dockerfile" | "yaml";
 
 const BASH_RE =
   /(#.*$)|("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*')|(\$\{[^}]*\}|\$[A-Za-z_]\w*|\$\?|\$\*)|\b(if|then|else|elif|fi|for|while|do|done|case|esac|in|function|set|export|local|readonly|trap|exit|return|umask|shift)\b|\b(echo|printf|cd|mkdir|chmod|command|docker|git|cat|curl|bash|sh|zsh|source|exec|read|numfmt|tr|awk|grep|wc|sudo|apt-get|npm|npx|node|devcontainer|code|install|pull|login|run|clone|image|info|export|die|ok|log|warn|chmod)\b|(^|\s)(--?[A-Za-z][\w-]*)|(\b\d+(?:\.\d+)?\b)/g;
@@ -76,9 +76,24 @@ const DOCKER_GROUPS: (string | null)[] = [
   "tk-n", // 6 number
 ];
 
+const YAML_RE =
+  /(#.*$)|(\$\{\{[^}]*\}\})|("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*')|(^\s*- )|(^\s*[\w.-]+(?=\s*:))|(::?error::|::warning::)|\b(true|false|null)\b|(\b\d+(?:\.\d+)?\b)/g;
+
+const YAML_GROUPS: (string | null)[] = [
+  "tk-c", // 1 comment
+  "tk-v", // 2 ${{ expr }}
+  "tk-s", // 3 string
+  "tk-p", // 4 list marker
+  "tk-key", // 5 key
+  "tk-k", // 6 workflow command
+  "tk-k", // 7 bool/null
+  "tk-n", // 8 number
+];
+
 export function highlightLine(line: string, lang: Lang): ReactNode {
   if (lang === "json") return tokenize(line, JSON_RE, JSON_GROUPS);
   if (lang === "dockerfile") return tokenize(line, DOCKER_RE, DOCKER_GROUPS);
+  if (lang === "yaml") return tokenize(line, YAML_RE, YAML_GROUPS);
   return tokenize(line, BASH_RE, BASH_GROUPS);
 }
 

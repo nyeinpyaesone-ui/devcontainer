@@ -162,7 +162,7 @@ export default function CodePanel({
         <span className="hidden sm:inline text-mist-600">{file.lang} · utf-8 · lf</span>
         <span className="ml-auto hidden lg:flex items-center gap-1.5 text-mist-600">
           <Kbd>⌘</Kbd>
-          <Kbd>1–4</Kbd>
+          <Kbd>1–5</Kbd>
           tabs
           <span className="mx-1 text-ink-600">·</span>
           <Kbd>⌘S</Kbd>

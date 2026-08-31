@@ -21,6 +21,14 @@ export interface PostStep {
   on: boolean;
 }
 
+export interface Enforcement {
+  nonRoot: boolean;
+  engines: boolean;
+  secretsGuard: boolean;
+  preCommit: boolean;
+  schemaGate: boolean;
+}
+
 export interface Config {
   owner: string;
   repo: string;
@@ -35,6 +43,7 @@ export interface Config {
   namedVolume: boolean;
   smokeTest: boolean;
   aptExtra: string;
+  enforce: Enforcement;
 }
 
 export const DEFAULT_CONFIG: Config = {
@@ -121,6 +130,13 @@ export const DEFAULT_CONFIG: Config = {
   namedVolume: true,
   smokeTest: true,
   aptExtra: "curl, jq, postgresql-client",
+  enforce: {
+    nonRoot: true,
+    engines: true,
+    secretsGuard: true,
+    preCommit: true,
+    schemaGate: true,
+  },
 };
 
 // ── derived helpers ──────────────────────────────────────────────────────────
@@ -143,6 +159,71 @@ export function postCreateCommand(c: Config): string | null {
   const cmds = activeSteps(c).map((s) => s.cmd);
   return cmds.length ? cmds.join(" && ") : null;
 }
+
+// ── policy enforcement model ─────────────────────────────────────────────────
+
+export interface PolicyState {
+  id: "P1" | "P2" | "P3" | "P4" | "P5";
+  label: string;
+  status: "enforced" | "warn" | "violation" | "off";
+  detail: string;
+}
+
+export function policyMatrix(c: Config): PolicyState[] {
+  const e = c.enforce;
+  const nodeFeat = c.features.find((f) => f.id === "node");
+  const nodeOn = !!nodeFeat?.on;
+  const nodeVer = nodeFeat?.version ?? "22";
+  const isRoot = c.remoteUser === "root";
+  return [
+    {
+      id: "P1",
+      label: "non-root",
+      status: !e.nonRoot ? "off" : isRoot ? "violation" : "enforced",
+      detail: !e.nonRoot
+        ? "check disabled — any user accepted"
+        : isRoot
+          ? "remoteUser=root — generated script exits 1, CI gate fails"
+          : `container runs as '${c.remoteUser}' — verified in script + CI`,
+    },
+    {
+      id: "P2",
+      label: "runtime pin",
+      status: !e.engines ? "off" : nodeOn ? "enforced" : "warn",
+      detail: !e.engines
+        ? "no .nvmrc written — toolchains may drift"
+        : nodeOn
+          ? `.nvmrc pinned to node ${nodeVer} on every setup run`
+          : "node feature off — nothing to pin",
+    },
+    {
+      id: "P3",
+      label: "secret hygiene",
+      status: e.secretsGuard ? "enforced" : "warn",
+      detail: e.secretsGuard
+        ? ".env + .env.local force-ignored on setup"
+        : ".env unguarded — secrets could be committed",
+    },
+    {
+      id: "P4",
+      label: "pre-commit",
+      status: e.preCommit ? "enforced" : "warn",
+      detail: e.preCommit
+        ? ".githooks/pre-commit refuses staged .env files"
+        : "staged secret files would pass silently",
+    },
+    {
+      id: "P5",
+      label: "schema gate",
+      status: e.schemaGate ? "enforced" : "warn",
+      detail: e.schemaGate
+        ? "jq parse locally · devcontainer build gate in CI"
+        : "broken devcontainer.json only surfaces on 'up'",
+    },
+  ];
+}
+
+export const hasViolation = (c: Config) => c.enforce.nonRoot && c.remoteUser === "root";
 
 // ── devcontainer.json ────────────────────────────────────────────────────────
 
@@ -377,6 +458,102 @@ export function buildSetupScript(c: Config, json: string, dockerfile: string): s
     );
   }
 
+  // ── policy enforcement ─────────────────────────────────────────────
+  const enf = c.enforce;
+  const nodeFeat = c.features.find((f) => f.id === "node");
+  const nodeOn = !!nodeFeat?.on;
+  const nodeVer = nodeFeat?.version ?? "22";
+  const anyPolicy = enf.nonRoot || enf.engines || enf.secretsGuard || enf.preCommit || enf.schemaGate;
+
+  push(
+    `# ── step · policy enforcement ───────────────────────────────────────`,
+    anyPolicy
+      ? `log "enforcing \${REPO_NAME} environment policy"`
+      : `warn "all enforcement policies disabled — environment ships unguarded"`,
+    ``
+  );
+
+  if (enf.nonRoot) {
+    if (c.remoteUser === "root") {
+      push(
+        `# P1 · non-root execution — REFUSED`,
+        `die "P1 · remoteUser=root is refused by policy — choose 'vscode' or 'node' in the forge manifest"`,
+        ``
+      );
+    } else {
+      push(
+        `# P1 · non-root execution`,
+        `ok "P1 · container runs as '${c.remoteUser}' (non-root verified)"`,
+        ``
+      );
+    }
+  } else {
+    push(`# P1 · non-root execution (disabled)`, `warn "P1 · non-root check disabled — user: ${c.remoteUser}"`, ``);
+  }
+
+  if (enf.engines) {
+    if (nodeOn) {
+      push(
+        `# P2 · runtime pinning — .nvmrc committed next to the code`,
+        `printf '%s\\n' "${nodeVer}" > "\${PROJECT_DIR}/.nvmrc"`,
+        `ok "P2 · node ${nodeVer} pinned via .nvmrc (honored by nvm, fnm, volta)"`,
+        ``
+      );
+    } else {
+      push(`# P2 · runtime pinning`, `warn "P2 · node feature is off — runtime left unpinned"`, ``);
+    }
+  } else {
+    push(`# P2 · runtime pinning (disabled)`, `warn "P2 · no .nvmrc written — toolchains may drift"`, ``);
+  }
+
+  if (enf.secretsGuard) {
+    push(
+      `# P3 · secret hygiene — keep .env out of history`,
+      `touch "\${PROJECT_DIR}/.gitignore"`,
+      `grep -qxF ".env" "\${PROJECT_DIR}/.gitignore" 2>/dev/null || \\`,
+      `  printf '\\n# added by setup-env.sh · policy P3\\n.env\\n.env.local\\n' >> "\${PROJECT_DIR}/.gitignore"`,
+      `ok "P3 · .gitignore now guards .env"`,
+      ``
+    );
+  } else {
+    push(`# P3 · secret hygiene (disabled)`, `warn "P3 · .env left unguarded in .gitignore"`, ``);
+  }
+
+  if (enf.preCommit) {
+    push(
+      `# P4 · pre-commit guard — refuse staged secret files`,
+      `mkdir -p "\${PROJECT_DIR}/.githooks"`,
+      `cat > "\${PROJECT_DIR}/.githooks/pre-commit" <<'PRE_COMMIT_HOOK'`,
+      `#!/usr/bin/env sh`,
+      `if git diff --cached --name-only | grep -qE '(^|/)\\.env'; then`,
+      `  echo "✖ pre-commit: refusing to stage .env files (policy P3/P4)" >&2`,
+      `  exit 1`,
+      `fi`,
+      `PRE_COMMIT_HOOK`,
+      `chmod +x "\${PROJECT_DIR}/.githooks/pre-commit"`,
+      `git -C "\${PROJECT_DIR}" config core.hooksPath .githooks 2>/dev/null || true`,
+      `ok "P4 · pre-commit guard installed (core.hooksPath=.githooks)"`,
+      ``
+    );
+  } else {
+    push(`# P4 · pre-commit guard (disabled)`, `warn "P4 · staged .env files would pass silently"`, ``);
+  }
+
+  if (enf.schemaGate) {
+    push(
+      `# P5 · schema gate — validate what we just wrote`,
+      `if command -v jq >/dev/null 2>&1; then`,
+      `  jq empty "\${DEVCONTAINER_DIR}/devcontainer.json" || die "P5 · devcontainer.json is not valid JSON"`,
+      `  ok "P5 · devcontainer.json parses — full build gate runs in CI"`,
+      `else`,
+      `  warn "P5 · jq not found locally — schema gate deferred to CI"`,
+      `fi`,
+      ``
+    );
+  } else {
+    push(`# P5 · schema gate (disabled)`, `warn "P5 · config errors will only surface on 'devcontainer up'"`, ``);
+  }
+
   push(
     `# ── done ────────────────────────────────────────────────────────────`,
     `ok "artifacts written to \${DEVCONTAINER_DIR}"`,
@@ -422,6 +599,86 @@ export function buildQuickstart(c: Config): string {
   ].join("\n");
 }
 
+// ── CI policy gate ───────────────────────────────────────────────────────────
+
+export function buildWorkflow(c: Config): string {
+  const img = imageRef(c);
+  const e = c.enforce;
+  const blocks: string[] = [];
+
+  blocks.push(
+    `      - name: P1 · refuse root user`,
+    `        run: |`,
+    `          user=$(jq -r '.remoteUser // "vscode"' .devcontainer/devcontainer.json)`,
+    `          if [ "$user" = "root" ]; then`,
+    `            echo "::error::remoteUser=root violates the non-root policy"`,
+    `            exit 1`,
+    `          fi`,
+    `          echo "container user: $user"`,
+    ``
+  );
+
+  if (e.engines) {
+    blocks.push(
+      `      - name: P2 · runtime pin present`,
+      `        run: test -f .nvmrc && echo "node pinned to $(cat .nvmrc)"`,
+      ``
+    );
+  }
+
+  blocks.push(
+    `      - name: P5 · config build gate`,
+    `        run: devcontainer build --workspace-folder .`,
+    ``
+  );
+
+  if (e.secretsGuard || e.preCommit) {
+    blocks.push(
+      `      - name: P3/P4 · secret scan`,
+      `        uses: gitleaks/gitleaks-action@v2`,
+      `        env:`,
+      `          GITHUB_TOKEN: \${{ secrets.GITHUB_TOKEN }}`,
+      ``
+    );
+  }
+
+  blocks.push(
+    `      - name: Smoke test against GHCR`,
+    `        run: |`,
+    `          docker pull ${img}`,
+    `          docker run --rm ${img} sh -lc 'echo "image healthy: $(whoami)"'`
+  );
+
+  return `# CI enforcement for the ${c.owner}/${c.repo} devcontainer environment.
+# Generated by the forge — regenerate, don't hand-edit.
+
+name: validate-devcontainer
+
+on:
+  push:
+    paths: [".devcontainer/**", "package.json", "package-lock.json", ".nvmrc"]
+  pull_request:
+    paths: [".devcontainer/**"]
+  schedule:
+    - cron: "17 4 * * 1" # weekly drift check against GHCR
+
+jobs:
+  policy-gate:
+    name: environment policy gate
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install devcontainer CLI
+        run: npm install -g @devcontainers/cli
+
+${blocks.join("\n")}
+`;
+}
+
 // ── artifacts bundle ─────────────────────────────────────────────────────────
 
 export interface Artifacts {
@@ -429,6 +686,7 @@ export interface Artifacts {
   json: string;
   dockerfile: string;
   quickstart: string;
+  workflow: string;
 }
 
 export function buildArtifacts(c: Config): Artifacts {
@@ -439,6 +697,7 @@ export function buildArtifacts(c: Config): Artifacts {
     json,
     dockerfile,
     quickstart: buildQuickstart(c),
+    workflow: buildWorkflow(c),
   };
 }
 
@@ -456,6 +715,7 @@ export function estimateSeconds(c: Config): number {
   const pkgs = aptList(c).length;
   if (pkgs) s += 16 + pkgs * 2;
   if (c.smokeTest) s += 7;
+  if (Object.values(c.enforce).some(Boolean)) s += 8;
   return s;
 }
 
@@ -482,7 +742,7 @@ export function byteSize(s: string): string {
 
 export interface RunLine {
   t: string;
-  c: "cmd" | "log" | "ok" | "warn" | "dim" | "exit";
+  c: "cmd" | "log" | "ok" | "warn" | "dim" | "exit" | "err";
 }
 
 export function buildRunLines(c: Config, arts: Artifacts): RunLine[] {
@@ -521,9 +781,43 @@ export function buildRunLines(c: Config, arts: Artifacts): RunLine[] {
     lines.push({ t: `▸ smoke-testing the image entrypoint`, c: "log" });
     lines.push({ t: `✔ smoke test passed`, c: "ok" });
   }
+
+  // ── policy enforcement ─────────────────────────────────────────────
+  const e = c.enforce;
+  const nodeFeat = c.features.find((f) => f.id === "node");
+  const violated = hasViolation(c);
+  const anyPolicy = e.nonRoot || e.engines || e.secretsGuard || e.preCommit || e.schemaGate;
+  lines.push({ t: `▸ enforcing ${c.repo} environment policy`, c: "log" });
+  if (!anyPolicy) {
+    lines.push({ t: `▲ all enforcement policies disabled — shipping unguarded`, c: "warn" });
+  } else {
+    if (e.nonRoot) {
+      lines.push(
+        violated
+          ? { t: `✖ P1 · remoteUser=root is refused by policy`, c: "err" }
+          : { t: `✔ P1 · container runs as '${c.remoteUser}' (non-root verified)`, c: "ok" }
+      );
+    }
+    if (e.engines) {
+      lines.push(
+        nodeFeat?.on
+          ? { t: `✔ P2 · node ${nodeFeat.version ?? "22"} pinned via .nvmrc`, c: "ok" }
+          : { t: `▲ P2 · node feature off — runtime left unpinned`, c: "warn" }
+      );
+    }
+    if (e.secretsGuard) lines.push({ t: `✔ P3 · .gitignore now guards .env`, c: "ok" });
+    if (e.preCommit) lines.push({ t: `✔ P4 · pre-commit guard installed`, c: "ok" });
+    if (e.schemaGate) lines.push({ t: `✔ P5 · devcontainer.json parses — build gate runs in CI`, c: "ok" });
+  }
+
   lines.push({ t: ``, c: "dim" });
-  lines.push({ t: `✔ ${c.repo} environment ready — code "./${c.repo}"`, c: "ok" });
-  lines.push({ t: `exit 0 · wall ${formatDuration(estimateSeconds(c))}`, c: "exit" });
+  if (violated) {
+    lines.push({ t: `✖ ${c.repo} environment refused — fix P1 in the manifest`, c: "err" });
+    lines.push({ t: `exit 1 · policy gate failed after ${formatDuration(estimateSeconds(c))}`, c: "exit" });
+  } else {
+    lines.push({ t: `✔ ${c.repo} environment ready — code "./${c.repo}"`, c: "ok" });
+    lines.push({ t: `exit 0 · wall ${formatDuration(estimateSeconds(c))}`, c: "exit" });
+  }
   return lines;
 }
 
@@ -642,6 +936,7 @@ export function loadConfig(): { cfg: Config; restored: boolean } {
       ...p,
       features: mergeList(DEFAULT_CONFIG.features, p.features),
       postSteps: mergeList(DEFAULT_CONFIG.postSteps, p.postSteps),
+      enforce: { ...DEFAULT_CONFIG.enforce, ...(p.enforce ?? {}) },
     };
     return { cfg, restored: true };
   } catch {

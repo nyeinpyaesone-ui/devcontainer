@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import CodePanel, { type FileTab } from "./components/CodePanel";
 import DryRunModal from "./components/DryRunModal";
 import LayerStack from "./components/LayerStack";
+import PolicyMatrix from "./components/PolicyMatrix";
 import Toasts, { type Toast } from "./components/Toasts";
 import {
   ChipInput,
@@ -28,11 +29,14 @@ import {
   DEFAULT_CONFIG,
   estimateSeconds,
   formatDuration,
+  hasViolation,
   imageRef,
   loadConfig,
+  policyMatrix,
   saveConfig,
   shortHash,
   type Config,
+  type Enforcement,
 } from "./lib/generator";
 import { countLines } from "./lib/highlight";
 
@@ -135,6 +139,7 @@ export default function App() {
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [showRun, setShowRun] = useState(false);
   const [verified, setVerified] = useState(false);
+  const [runFailed, setRunFailed] = useState(false);
   const [scriptCopied, setScriptCopied] = useState(false);
   const toastId = useRef(0);
   const announcedRestore = useRef(false);
@@ -168,12 +173,23 @@ export default function App() {
   const patch = (p: Partial<Config>) => {
     setCfg((c) => ({ ...c, ...p }));
     setVerified(false);
+    setRunFailed(false);
   };
+
+  const patchEnforce = (key: keyof Enforcement, v: boolean) => {
+    setCfg((c) => ({ ...c, enforce: { ...c.enforce, [key]: v } }));
+    setVerified(false);
+    setRunFailed(false);
+  };
+
+  const policies = useMemo(() => policyMatrix(cfg), [cfg]);
+  const enforcedCount = policies.filter((p) => p.status === "enforced").length;
 
   const files: FileTab[] = [
     { name: "setup-env.sh", lang: "bash", badge: "sh", content: arts.setup },
     { name: "devcontainer.json", lang: "json", badge: "json", content: arts.json },
     { name: "Dockerfile", lang: "dockerfile", badge: "docker", content: arts.dockerfile },
+    { name: "validate-devcontainer.yml", lang: "yaml", badge: "ci", content: arts.workflow },
     { name: "quickstart.sh", lang: "bash", badge: "sh", content: arts.quickstart },
   ];
 
@@ -189,8 +205,9 @@ export default function App() {
     downloadFile("setup-env.sh", arts.setup);
     window.setTimeout(() => downloadFile("devcontainer.json", arts.json), 260);
     window.setTimeout(() => downloadFile("Dockerfile", arts.dockerfile), 520);
-    window.setTimeout(() => downloadFile("quickstart.sh", arts.quickstart), 780);
-    toast("4 artifacts downloaded");
+    window.setTimeout(() => downloadFile("validate-devcontainer.yml", arts.workflow), 780);
+    window.setTimeout(() => downloadFile("quickstart.sh", arts.quickstart), 1040);
+    toast("5 artifacts downloaded");
   };
 
   // keyboard shortcuts — ref pattern keeps closures fresh
@@ -198,7 +215,7 @@ export default function App() {
   keyHandler.current = (e) => {
     const mod = e.metaKey || e.ctrlKey;
     if (!mod) return;
-    if (/^[1-4]$/.test(e.key)) {
+    if (/^[1-5]$/.test(e.key)) {
       e.preventDefault();
       setTab(Number(e.key) - 1);
     } else if (e.key.toLowerCase() === "s") {
@@ -222,9 +239,12 @@ export default function App() {
         ? `features: ${feats.map((f) => f.ref.split("/").pop() + (f.version ? "@" + f.version : "")).join(" · ")}`
         : "features: none selected",
       `forwarding :${cfg.ports.join(" :")} → localhost`,
+      hasViolation(cfg)
+        ? "⚠ policy P1: remoteUser=root — build will be refused"
+        : `policy: ${enforcedCount}/5 gates enforced · CI gate armed`,
       "spec devcontainers/v0.245.2 · schema valid",
     ],
-    [img, arts.setup, feats, cfg.ports]
+    [img, arts.setup, feats, cfg.ports, cfg, enforcedCount]
   );
 
   return (
@@ -282,15 +302,21 @@ export default function App() {
               className={`hidden sm:flex items-center gap-2 font-mono text-[10.5px] px-2.5 py-1.5 rounded-lg border ${
                 verified
                   ? "border-lagoon-500/40 text-lagoon-300 bg-lagoon-500/[0.07]"
-                  : "border-ink-600 text-mist-500 bg-ink-900/60"
+                  : runFailed
+                    ? "border-coral-500/45 text-coral-400 bg-coral-500/[0.07]"
+                    : "border-ink-600 text-mist-500 bg-ink-900/60"
               }`}
             >
               <span
                 className={`w-1.5 h-1.5 rounded-full ${
-                  verified ? "bg-lagoon-400 led-live" : "bg-ember-500/80"
+                  verified
+                    ? "bg-lagoon-400 led-live"
+                    : runFailed
+                      ? "bg-coral-500 violation-pulse"
+                      : "bg-ember-500/80"
                 }`}
               />
-              {verified ? "dry-run passed" : "unverified"}
+              {verified ? "dry-run passed" : runFailed ? "dry-run failed" : "unverified"}
             </span>
 
             <button
@@ -423,6 +449,16 @@ export default function App() {
                   ]}
                 />
               </div>
+              {hasViolation(cfg) && (
+                <div className="rounded-lg border border-coral-500/45 bg-coral-500/[0.07] px-3 py-2.5 text-[12px] text-coral-400 leading-relaxed">
+                  <span className="font-mono text-[9.5px] uppercase tracking-[0.16em] mr-2 align-middle border border-coral-500/40 rounded px-1.5 py-0.5">
+                    P1 violation
+                  </span>
+                  remoteUser=root — the generated script will{" "}
+                  <span className="font-semibold">exit 1</span> and the CI gate will fail until you
+                  switch to a non-root user.
+                </div>
+              )}
               <Switch
                 on={cfg.namedVolume}
                 onChange={(v) => patch({ namedVolume: v })}
@@ -532,6 +568,52 @@ export default function App() {
             </Section>
           </Reveal>
 
+          <Reveal delay={220}>
+            <Section index="06" title="Enforcement" hint={`${enforcedCount}/5 gates`}>
+              {(
+                [
+                  {
+                    key: "nonRoot",
+                    label: "P1 · non-root execution",
+                    desc: "Refuse remoteUser=root — script exits 1, CI gate fails",
+                  },
+                  {
+                    key: "engines",
+                    label: "P2 · runtime pinning",
+                    desc: "Write .nvmrc on setup — honored by nvm, fnm, volta",
+                  },
+                  {
+                    key: "secretsGuard",
+                    label: "P3 · secret hygiene",
+                    desc: "Force .env / .env.local into .gitignore every run",
+                  },
+                  {
+                    key: "preCommit",
+                    label: "P4 · pre-commit guard",
+                    desc: "Install .githooks — staged .env files are refused",
+                  },
+                  {
+                    key: "schemaGate",
+                    label: "P5 · schema gate",
+                    desc: "jq parse locally · devcontainer build gate in CI",
+                  },
+                ] as { key: keyof Enforcement; label: string; desc: string }[]
+              ).map((d) => (
+                <Switch
+                  key={d.key}
+                  on={cfg.enforce[d.key]}
+                  onChange={(v) => patchEnforce(d.key, v)}
+                  label={d.label}
+                  desc={d.desc}
+                />
+              ))}
+              <p className="font-mono text-[10.5px] text-mist-600 leading-relaxed">
+                policies are compiled into <span className="text-mist-300">setup-env.sh</span> and
+                re-checked on every push by <span className="text-skyx-400">validate-devcontainer.yml</span>
+              </p>
+            </Section>
+          </Reveal>
+
           {/* live summary */}
           <Reveal delay={240}>
             <div className="sticky bottom-4 border border-ink-600/80 rounded-xl bg-ink-850/95 backdrop-blur px-4 py-3.5 shadow-[0_16px_44px_-18px_rgba(0,0,0,0.85)]">
@@ -563,7 +645,7 @@ export default function App() {
               </div>
               <div className="mt-3 pt-3 border-t border-ink-700/70 flex items-center justify-between font-mono text-[10.5px] text-mist-600">
                 <span>
-                  bundle {byteSize(arts.setup + arts.json + arts.dockerfile)} ·{" "}
+                  bundle {byteSize(arts.setup + arts.json + arts.dockerfile + arts.workflow + arts.quickstart)} ·{" "}
                   <span className="text-mist-500">autosaved</span>
                 </span>
                 <span>
@@ -602,7 +684,7 @@ export default function App() {
                 <p className="basis-full sm:basis-auto sm:max-w-[330px] text-[13px] text-mist-500 leading-relaxed sm:ml-auto">
                   Tune the manifest on the left — every keystroke rebuilds{" "}
                   <code className="font-mono text-[12px] text-mist-300">setup-env.sh</code>, the
-                  devcontainer config and the extending Dockerfile below.
+                  devcontainer config, the extending Dockerfile and the CI policy gate below.
                 </p>
               </div>
             </div>
@@ -612,7 +694,11 @@ export default function App() {
             <BootstrapStrip line={bootstrapLine(cfg)} onToast={toast} />
           </Reveal>
 
-          <Reveal delay={140}>
+          <Reveal delay={120}>
+            <PolicyMatrix policies={policies} />
+          </Reveal>
+
+          <Reveal delay={160}>
             <CodePanel files={files} onToast={toast} active={tab} onTabChange={setTab} />
           </Reveal>
 
@@ -644,9 +730,9 @@ export default function App() {
                     {
                       n: "3",
                       t: "Share",
-                      d: "Commit .devcontainer/ to the ERP repo — every teammate gets the identical environment.",
+                      d: "Commit .devcontainer/ plus the CI gate — every teammate gets the identical, policy-checked environment.",
                       c: "text-skyx-400",
-                      cmd: "git add .devcontainer && git commit",
+                      cmd: "git add .devcontainer .github && git commit",
                     },
                   ].map((s, i) => (
                     <li key={s.n} className="relative sm:px-4 first:pl-0">
@@ -681,7 +767,7 @@ export default function App() {
         <div className="max-w-[1480px] mx-auto px-4 sm:px-6 py-3.5 flex flex-wrap items-center gap-x-6 gap-y-1.5 font-mono text-[11px] text-mist-600">
           <span className="flex items-center gap-2">
             <span className="led-live w-1.5 h-1.5 rounded-full bg-lagoon-400" />
-            forge v1.5.0 · spec devcontainers/v0.245.2
+            forge v1.6.0 · spec devcontainers/v0.245.2 · policy gates P1–P5
           </span>
           <span className="hidden md:inline">manifest autosaves to this browser</span>
           <span className="sm:ml-auto flex items-center gap-2.5 min-w-0 max-w-full">
@@ -697,10 +783,13 @@ export default function App() {
         <DryRunModal
           lines={runLines}
           title={img}
+          failed={hasViolation(cfg)}
           onClose={() => setShowRun(false)}
           onDone={() => {
-            setVerified(true);
-            toast("dry-run passed · exit 0");
+            const failed = hasViolation(cfg);
+            setVerified(!failed);
+            setRunFailed(failed);
+            toast(failed ? "dry-run failed · P1 refused the build" : "dry-run passed · exit 0");
           }}
         />
       )}
