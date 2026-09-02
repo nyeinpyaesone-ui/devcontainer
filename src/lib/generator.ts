@@ -29,6 +29,16 @@ export interface Enforcement {
   schemaGate: boolean;
 }
 
+export type CloneStrategy = "off" | "shallow" | "partial" | "full";
+
+export interface GitTuning {
+  protocolV2: boolean;
+  commitGraph: boolean;
+  maintenance: boolean;
+  sshSign: boolean;
+  bundle: boolean;
+}
+
 export interface ToolGroup {
   id: string;
   label: string;
@@ -63,10 +73,20 @@ export interface Config {
   langs: LangChain[];
   namedVolume: boolean;
   smokeTest: boolean;
-  cloneRepo: boolean;
+  clone: CloneStrategy;
+  git: GitTuning;
   aptExtra: string;
   enforce: Enforcement;
 }
+
+export const gitTuningCount = (c: Config) => Object.values(c.git).filter(Boolean).length;
+
+export const cloneLabel: Record<CloneStrategy, string> = {
+  off: "existing workspace",
+  shallow: "shallow · depth 1",
+  partial: "partial · blob:none",
+  full: "full history",
+};
 
 export const DEFAULT_CONFIG: Config = {
   owner: "nyeinpyaesone-ui",
@@ -274,7 +294,14 @@ export const DEFAULT_CONFIG: Config = {
   ],
   namedVolume: true,
   smokeTest: true,
-  cloneRepo: true,
+  clone: "shallow",
+  git: {
+    protocolV2: true,
+    commitGraph: true,
+    maintenance: true,
+    sshSign: false,
+    bundle: false,
+  },
   aptExtra: "postgresql-client, redis-tools",
   enforce: {
     nonRoot: true,
@@ -1362,7 +1389,11 @@ export function loadConfig(): { cfg: Config; restored: boolean } {
       toolGroups: mergeList(DEFAULT_CONFIG.toolGroups, p.toolGroups),
       langs: mergeList(DEFAULT_CONFIG.langs, p.langs),
       enforce: { ...DEFAULT_CONFIG.enforce, ...(p.enforce ?? {}) },
+      git: { ...DEFAULT_CONFIG.git, ...(p.git ?? {}) },
     };
+    // migrate legacy persisted manifests (pre git-internals)
+    const legacy = p as { cloneRepo?: boolean };
+    if (!("clone" in p) && legacy.cloneRepo === false) cfg.clone = "off";
     return { cfg, restored: true };
   } catch {
     return { cfg: DEFAULT_CONFIG, restored: false };
