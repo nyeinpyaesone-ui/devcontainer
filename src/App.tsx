@@ -3,12 +3,17 @@ import ChangelogModal from "./components/ChangelogModal";
 import CodePanel, { type FileTab } from "./components/CodePanel";
 import CommandPalette, { type PaletteGroup } from "./components/CommandPalette";
 import CompareMode from "./components/CompareMode";
+import CostEstimation from "./components/CostEstimation";
+import DependencyGraph from "./components/DependencyGraph";
 import DryRunModal from "./components/DryRunModal";
+import GitHubTemplateExport from "./components/GitHubTemplateExport";
 import HistoryTracker from "./components/HistoryTracker";
 import LayerStack from "./components/LayerStack";
+import MultiEnvironmentSelector from "./components/MultiEnvironmentSelector";
 import OnboardingTour from "./components/OnboardingTour";
 import PerfDashboard from "./components/PerfDashboard";
 import PolicyMatrix from "./components/PolicyMatrix";
+import SecurityAuditModal from "./components/SecurityAuditModal";
 import ShortcutsModal from "./components/ShortcutsModal";
 import TemplatePicker from "./components/TemplatePicker";
 import Toasts from "./components/Toasts";
@@ -70,6 +75,8 @@ export default function App() {
   const [changelogOpen, setChangelogOpen] = useState(false);
   const [perfDashboardOpen, setPerfDashboardOpen] = useState(false);
   const [compareOpen, setCompareOpen] = useState(false);
+  const [securityAuditOpen, setSecurityAuditOpen] = useState(false);
+  const [githubTemplateOpen, setGithubTemplateOpen] = useState(false);
   const announcedRestore = useRef(false);
   const announcedOnboarding = useRef(false);
 
@@ -369,7 +376,7 @@ export default function App() {
               <div className="font-display font-bold tracking-[0.04em] text-[15px] text-mist-100 whitespace-nowrap">
                 DEVCONTAINER <span className="text-ember-500">FORGE</span>
                 <span className="ml-2 text-[9px] font-mono font-normal text-mist-600 bg-ink-800 px-1.5 py-0.5 rounded border border-ink-700">
-                  v1.9.0
+                  v2.0.0
                 </span>
               </div>
               <div className="font-mono text-[10.5px] text-mist-600 truncate">
@@ -478,6 +485,28 @@ export default function App() {
                   <path d="M14 9.5A6.5 6.5 0 0 1 6.5 2 5.5 5.5 0 1 0 14 9.5z" />
                 </svg>
               )}
+            </button>
+            <button
+              type="button"
+              onClick={() => setSecurityAuditOpen(true)}
+              title="Security audit"
+              className="grid place-items-center w-8 h-8 rounded-lg border border-ink-700 bg-ink-900/60 text-mist-500 transition-all hover:border-red-500/50 hover:text-red-400 active:scale-95"
+            >
+              <svg viewBox="0 0 16 16" className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="1.5">
+                <path d="M8 1L2 4v4c0 3.5 2.5 6.5 6 7.5 3.5-1 6-4 6-7.5V4L8 1z" strokeLinejoin="round" />
+                <path d="M6 8l2 2 4-4" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            </button>
+            <button
+              type="button"
+              onClick={() => setGithubTemplateOpen(true)}
+              title="Export GitHub template"
+              className="grid place-items-center w-8 h-8 rounded-lg border border-ink-700 bg-ink-900/60 text-mist-500 transition-all hover:border-green-500/50 hover:text-green-400 active:scale-95"
+            >
+              <svg viewBox="0 0 16 16" className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="1.5">
+                <path d="M6 3h4l3 3v7a1 1 0 01-1 1H4a1 1 0 01-1-1V4a1 1 0 011-1h2z" strokeLinejoin="round" />
+                <path d="M10 3v3h3M8 9v3M6.5 10.5h3" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
             </button>
             <button
               type="button"
@@ -1105,6 +1134,14 @@ export default function App() {
               </div>
             </div>
           </Reveal>
+
+          <Reveal delay={200}>
+            <div className="space-y-5">
+              <CostEstimation config={cfg} />
+              <DependencyGraph config={cfg} />
+              <MultiEnvironmentSelector config={cfg} onApply={setCfg} />
+            </div>
+          </Reveal>
         </div>
       </main>
 
@@ -1112,7 +1149,7 @@ export default function App() {
         <div className="max-w-[1480px] mx-auto px-4 sm:px-6 py-3.5 flex flex-wrap items-center gap-x-6 gap-y-1.5 font-mono text-[11px] text-mist-600">
           <span className="flex items-center gap-2">
             <span className="led-live w-1.5 h-1.5 rounded-full bg-lagoon-400" />
-            forge v1.9.0 · spec devcontainers/v0.245.2 · toolchains + policy gates P1–P5
+            forge v2.0.0 · spec devcontainers/v0.245.2 · toolchains + policy gates P1–P5
           </span>
           <span className="hidden md:inline">manifest autosaves to this browser</span>
           <span className="sm:ml-auto">
@@ -1142,6 +1179,8 @@ export default function App() {
       <ChangelogModal open={changelogOpen} onClose={() => setChangelogOpen(false)} />
       <PerfDashboard open={perfDashboardOpen} onClose={() => setPerfDashboardOpen(false)} />
       <CompareMode currentConfig={cfg} onClose={() => setCompareOpen(false)} />
+      {securityAuditOpen && <SecurityAuditModal config={cfg} onClose={() => setSecurityAuditOpen(false)} />}
+      {githubTemplateOpen && <GitHubTemplateExport config={cfg} onClose={() => setGithubTemplateOpen(false)} />}
       <Toasts />
     </div>
   );
