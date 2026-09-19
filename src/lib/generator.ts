@@ -2,6 +2,8 @@
 // Generator core: config model + artifact builders for the GHCR devcontainer
 // environment of nyeinpyaesone-ui/ERP.
 // ────────────────────────────────────────────────────────────────────────────
+import { byteSize, formatDuration, shortHash } from "../services/format";
+import { defineStore } from "../services/persistence";
 
 export interface FeatureDef {
   id: string;
@@ -534,7 +536,7 @@ export function readiness(c: Config): Readiness {
   const tools = activeToolGroups(c);
   const enforced = policyMatrix(c).filter((p) => p.status === "enforced").length;
   const items: ReadinessItem[] = [
-    { label: "repo clone wired", pts: 10, on: c.cloneRepo },
+    { label: "repo clone wired", pts: 10, on: c.clone !== "off" },
     { label: "runtime features", pts: 14, on: feats.length > 0 },
     { label: "toolchains pinned", pts: 12, on: langs.length > 0 },
     { label: "essential tooling", pts: 12, on: tools.length >= 2 },
@@ -694,7 +696,7 @@ export function buildSetupScript(c: Config, json: string, dockerfile: string): s
     `IMAGE_REF="\${GHCR_REGISTRY}/\${REPO_OWNER,,}/\${REPO_NAME,,}:\${IMAGE_TAG}"`,
     `PROJECT_DIR="\${PROJECT_DIR:-$PWD/\${REPO_NAME}}"`,
     `DEVCONTAINER_DIR="\${PROJECT_DIR}/.devcontainer"`,
-    `CLONE_REPO="${c.cloneRepo ? 1 : 0}"`,
+    `CLONE_STRATEGY="${c.clone}"`,
     ``,
     `# ── ui helpers ───────────────────────────────────────────────────────`,
     `if [ -t 1 ]; then`,
@@ -747,19 +749,48 @@ export function buildSetupScript(c: Config, json: string, dockerfile: string): s
   );
 
   push(
-    `# ── step 4 · clone repo & scaffold workspace ─────────────────────────`,
+    `# ── step 4 · clone repo (${cloneLabel[c.clone]}) ─────────────────────`,
     `if [ -d "\${PROJECT_DIR}/.git" ]; then`,
     `  ok "workspace already present at \${PROJECT_DIR}"`,
-    `elif [ "$CLONE_REPO" = "1" ]; then`,
-    `  log "cloning github.com/\${REPO_OWNER}/\${REPO_NAME} (depth 1)"`,
-    `  git clone --depth 1 "https://github.com/\${REPO_OWNER}/\${REPO_NAME}.git" "$PROJECT_DIR"`,
-    `  ok "cloned → \${PROJECT_DIR}"`,
+    `elif [ "$CLONE_STRATEGY" = "off" ]; then`,
+    `  die "workspace not found at \${PROJECT_DIR} — clone strategy is 'off'"`,
     `else`,
-    `  die "workspace not found at \${PROJECT_DIR} — cloning is disabled in the manifest"`,
+    `  case "$CLONE_STRATEGY" in`,
+    `    shallow) CLONE_FLAGS="--depth 1" ;;`,
+    `    partial) CLONE_FLAGS="--filter=blob:none" ;;`,
+    `    *)       CLONE_FLAGS="" ;;`,
+    `  esac`,
+    `  log "cloning github.com/\${REPO_OWNER}/\${REPO_NAME} (\${CLONE_STRATEGY})"`,
+    `  # shellcheck disable=SC2086`,
+    `  git clone $CLONE_FLAGS "https://github.com/\${REPO_OWNER}/\${REPO_NAME}.git" "$PROJECT_DIR"`,
+    `  ok "cloned → \${PROJECT_DIR}"`,
     `fi`,
-    `mkdir -p "$DEVCONTAINER_DIR"`,
     ``
   );
+
+  // git performance tuning — repo-local config keeps future clones/fetches fast
+  const tuning: Array<[keyof GitTuning, string, string]> = [
+    ["protocolV2", "protocol.version", "2"],
+    ["commitGraph", "core.commitGraph", "true"],
+    ["maintenance", "maintenance.auto", "true"],
+    ["sshSign", "gpg.format", "ssh"],
+  ];
+  const activeTuning = tuning.filter(([k]) => c.git[k]);
+  if (activeTuning.length || c.git.bundle) {
+    push(`# ── git performance tuning ──────────────────────────────────────────`);
+    for (const [, key, val] of activeTuning) {
+      push(`git -C "$PROJECT_DIR" config ${key} ${val} 2>/dev/null || true`);
+    }
+    if (c.git.commitGraph) {
+      push(`git -C "$PROJECT_DIR" commit-graph write --reachable 2>/dev/null || true`);
+    }
+    if (c.git.bundle) {
+      push(`warn "bundle-uri enabled — set fetch.bundleUri.<id>.uri in .git/config to activate"`);
+    }
+    push(`ok "git tuning applied (${gitTuningCount(c)} settings)"`, ``);
+  }
+
+  push(`mkdir -p "$DEVCONTAINER_DIR"`, ``);
 
   push(
     `# ── step 5 · write devcontainer.json ─────────────────────────────────`,
@@ -1130,24 +1161,9 @@ export function estimateSeconds(c: Config): number {
   return s;
 }
 
-export function formatDuration(total: number): string {
-  const m = Math.floor(total / 60);
-  const s = total % 60;
-  return m ? `${m}m ${String(s).padStart(2, "0")}s` : `${s}s`;
-}
-
-export function shortHash(content: string): string {
-  let h = 5381;
-  for (let i = 0; i < content.length; i++) {
-    h = ((h << 5) + h + content.charCodeAt(i)) | 0;
-  }
-  return (h >>> 0).toString(16).padStart(8, "0");
-}
-
-export function byteSize(s: string): string {
-  const b = new TextEncoder().encode(s).length;
-  return b < 1024 ? `${b} B` : `${(b / 1024).toFixed(1)} kB`;
-}
+// formatDuration / shortHash / byteSize live in services/format and are
+// re-exported here so existing consumers keep working unchanged.
+export { byteSize, formatDuration, shortHash };
 
 // ── dry-run script (simulated terminal output) ──────────────────────────────
 
@@ -1172,11 +1188,13 @@ export function buildRunLines(c: Config, arts: Artifacts): RunLine[] {
     { t: `  9f2c41e8a5d2 ▸▸▸▸▸▸▸▸▸▸▸▸▸▸▸▸▸▸▸▸ 100% · ${c.base === "alpine-3.20" ? "96 MiB" : "412 MiB"}`, c: "dim" },
     { t: `✔ cached locally`, c: "ok" },
   ];
-  if (c.cloneRepo) {
-    lines.push({ t: `▸ cloning github.com/${c.owner}/${c.repo} (depth 1)`, c: "log" });
+  if (c.clone !== "off") {
+    lines.push({ t: `▸ cloning github.com/${c.owner}/${c.repo} (${cloneLabel[c.clone]})`, c: "log" });
     lines.push({ t: `✔ cloned → ./${c.repo}`, c: "ok" });
+    const tune = gitTuningCount(c);
+    if (tune) lines.push({ t: `✔ git tuning applied (${tune} settings)`, c: "ok" });
   } else {
-    lines.push({ t: `▲ cloning disabled — expecting an existing workspace at ./${c.repo}`, c: "warn" });
+    lines.push({ t: `▲ clone strategy off — expecting an existing workspace at ./${c.repo}`, c: "warn" });
   }
   lines.push(
     { t: `▸ writing .devcontainer/devcontainer.json`, c: "log" },
@@ -1347,55 +1365,45 @@ export function estimateLayers(c: Config): LayerInfo[] {
 export const totalLayerMb = (layers: LayerInfo[]) =>
   layers.reduce((a, l) => a + l.mb, 0);
 
-// ── session persistence ──────────────────────────────────────────────────────
+// ── session persistence (built on services/persistence) ─────────────────────
 
-const STORE_KEY = "dcforge.manifest.v1";
+function mergeList<T extends { id: string }>(
+  defs: T[],
+  got?: Array<Partial<T> & { id: string }>
+): T[] {
+  return defs.map((d) => {
+    const g = got?.find((x) => x && x.id === d.id);
+    return g ? { ...d, ...g } : d;
+  });
+}
+
+const manifestStore = defineStore<Config>("dcforge.manifest.v1", DEFAULT_CONFIG, (raw, defaults) => {
+  const p = raw as Partial<Config>;
+  const cfg: Config = {
+    ...defaults,
+    ...p,
+    features: mergeList(defaults.features, p.features),
+    postSteps: mergeList(defaults.postSteps, p.postSteps),
+    toolGroups: mergeList(defaults.toolGroups, p.toolGroups),
+    langs: mergeList(defaults.langs, p.langs),
+    enforce: { ...defaults.enforce, ...(p.enforce ?? {}) },
+    git: { ...defaults.git, ...(p.git ?? {}) },
+  };
+  // migrate legacy persisted manifests (pre git-internals)
+  const legacy = p as { cloneRepo?: boolean };
+  if (!("clone" in p) && legacy.cloneRepo === false) cfg.clone = "off";
+  return cfg;
+});
 
 export function saveConfig(c: Config) {
-  try {
-    localStorage.setItem(STORE_KEY, JSON.stringify(c));
-  } catch {
-    /* storage unavailable — ignore */
-  }
+  manifestStore.save(c);
 }
 
 export function clearConfig() {
-  try {
-    localStorage.removeItem(STORE_KEY);
-  } catch {
-    /* ignore */
-  }
+  manifestStore.clear();
 }
 
 export function loadConfig(): { cfg: Config; restored: boolean } {
-  try {
-    const raw = localStorage.getItem(STORE_KEY);
-    if (!raw) return { cfg: DEFAULT_CONFIG, restored: false };
-    const p = JSON.parse(raw) as Partial<Config>;
-    if (!p || typeof p !== "object") return { cfg: DEFAULT_CONFIG, restored: false };
-    const mergeList = <T extends { id: string }>(
-      defs: T[],
-      got?: Array<Partial<T> & { id: string }>
-    ): T[] =>
-      defs.map((d) => {
-        const g = got?.find((x) => x && x.id === d.id);
-        return g ? { ...d, ...g } : d;
-      });
-    const cfg: Config = {
-      ...DEFAULT_CONFIG,
-      ...p,
-      features: mergeList(DEFAULT_CONFIG.features, p.features),
-      postSteps: mergeList(DEFAULT_CONFIG.postSteps, p.postSteps),
-      toolGroups: mergeList(DEFAULT_CONFIG.toolGroups, p.toolGroups),
-      langs: mergeList(DEFAULT_CONFIG.langs, p.langs),
-      enforce: { ...DEFAULT_CONFIG.enforce, ...(p.enforce ?? {}) },
-      git: { ...DEFAULT_CONFIG.git, ...(p.git ?? {}) },
-    };
-    // migrate legacy persisted manifests (pre git-internals)
-    const legacy = p as { cloneRepo?: boolean };
-    if (!("clone" in p) && legacy.cloneRepo === false) cfg.clone = "off";
-    return { cfg, restored: true };
-  } catch {
-    return { cfg: DEFAULT_CONFIG, restored: false };
-  }
+  const { value, restored } = manifestStore.load();
+  return { cfg: value, restored };
 }
