@@ -1,10 +1,14 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import ChangelogModal from "./components/ChangelogModal";
 import CodePanel, { type FileTab } from "./components/CodePanel";
 import CommandPalette, { type PaletteGroup } from "./components/CommandPalette";
 import DryRunModal from "./components/DryRunModal";
 import LayerStack from "./components/LayerStack";
+import OnboardingTour from "./components/OnboardingTour";
+import PerfDashboard from "./components/PerfDashboard";
 import PolicyMatrix from "./components/PolicyMatrix";
 import ShortcutsModal from "./components/ShortcutsModal";
+import TemplatePicker from "./components/TemplatePicker";
 import Toasts from "./components/Toasts";
 import {
   ChipInput,
@@ -45,6 +49,9 @@ import {
   type Enforcement,
 } from "./lib/generator";
 import { useForgeBackend } from "./lib/useForgeBackend";
+import { useTheme } from "./hooks/useTheme";
+import { usePerformanceMetrics } from "./hooks/usePerformanceMetrics";
+import { templates, type Template } from "./lib/templates";
 
 export default function App() {
   const [boot] = useState(loadConfig);
@@ -56,7 +63,15 @@ export default function App() {
   const [scriptCopied, setScriptCopied] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  const [onboardingOpen, setOnboardingOpen] = useState(false);
+  const [templatePickerOpen, setTemplatePickerOpen] = useState(false);
+  const [changelogOpen, setChangelogOpen] = useState(false);
+  const [perfDashboardOpen, setPerfDashboardOpen] = useState(false);
   const announcedRestore = useRef(false);
+  const announcedOnboarding = useRef(false);
+
+  const { theme, toggle: toggleTheme } = useTheme();
+  const { metrics, recordGeneration } = usePerformanceMetrics();
 
   const backend = useForgeBackend(cfg);
   const { bundle, status, ms, cacheHits, workerOk, times } = backend;
@@ -72,6 +87,33 @@ export default function App() {
       toast("manifest restored from last session");
     }
   }, []);
+
+  // Auto-show onboarding for first-time users
+  useEffect(() => {
+    if (!boot.restored && !announcedOnboarding.current) {
+      announcedOnboarding.current = true;
+      const hasSeenTour = localStorage.getItem("forge.onboarding.seen");
+      if (!hasSeenTour) {
+        setTimeout(() => setOnboardingOpen(true), 800);
+      }
+    }
+  }, []);
+
+  // Record performance metrics on generation
+  useEffect(() => {
+    if (ms > 0) {
+      const bytesGenerated = arts.setup.length + arts.json.length + arts.dockerfile.length + arts.workflow.length + arts.quickstart.length;
+      const cacheHit = cacheHits > 0;
+      recordGeneration(ms, bytesGenerated, cacheHit);
+    }
+  }, [ms, arts, cacheHits, recordGeneration]);
+
+  // Mark onboarding as seen when closed
+  useEffect(() => {
+    if (!onboardingOpen && announcedOnboarding.current) {
+      localStorage.setItem("forge.onboarding.seen", "true");
+    }
+  }, [onboardingOpen]);
 
   useEffect(() => {
     saveConfig(cfg);
@@ -201,6 +243,12 @@ export default function App() {
     toast("5 artifacts downloaded");
   };
 
+  const applyTemplate = (template: Template) => {
+    setCfg((c) => ({ ...c, ...template.config }));
+    saveConfig({ ...cfg, ...template.config });
+    toast(`template "${template.name}" applied`);
+  };
+
   const keyHandler = useRef<(e: KeyboardEvent) => void>(() => {});
   keyHandler.current = (e) => {
     // "?" opens shortcuts help (no modifier needed)
@@ -313,7 +361,7 @@ export default function App() {
               <div className="font-display font-bold tracking-[0.04em] text-[15px] text-mist-100 whitespace-nowrap">
                 DEVCONTAINER <span className="text-ember-500">FORGE</span>
                 <span className="ml-2 text-[9px] font-mono font-normal text-mist-600 bg-ink-800 px-1.5 py-0.5 rounded border border-ink-700">
-                  v1.7.0
+                  v1.8.0
                 </span>
               </div>
               <div className="font-mono text-[10.5px] text-mist-600 truncate">
@@ -361,6 +409,67 @@ export default function App() {
               className="grid place-items-center w-8 h-8 rounded-lg border border-ink-700 bg-ink-900/60 text-mist-500 transition-all hover:border-mist-500/50 hover:text-mist-300 active:scale-95"
             >
               <Kbd>?</Kbd>
+            </button>
+            <button
+              type="button"
+              onClick={() => setTemplatePickerOpen(true)}
+              title="Start from template"
+              className="grid place-items-center w-8 h-8 rounded-lg border border-ink-700 bg-ink-900/60 text-mist-500 transition-all hover:border-coral-500/50 hover:text-coral-400 active:scale-95"
+            >
+              <svg viewBox="0 0 16 16" className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="1.5">
+                <rect x="2" y="2" width="5" height="5" rx="0.5" />
+                <rect x="9" y="2" width="5" height="5" rx="0.5" />
+                <rect x="2" y="9" width="5" height="5" rx="0.5" />
+                <rect x="9" y="9" width="5" height="5" rx="0.5" />
+              </svg>
+            </button>
+            <button
+              type="button"
+              onClick={() => setChangelogOpen(true)}
+              title="Changelog"
+              className="grid place-items-center w-8 h-8 rounded-lg border border-ink-700 bg-ink-900/60 text-mist-500 transition-all hover:border-lagoon-500/50 hover:text-lagoon-400 active:scale-95"
+            >
+              <svg viewBox="0 0 16 16" className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="1.5">
+                <path d="M8 2v12M4 6l4-4 4 4M4 10l4 4 4-4" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            </button>
+            <button
+              type="button"
+              onClick={() => setPerfDashboardOpen(true)}
+              title="Performance analytics"
+              className="grid place-items-center w-8 h-8 rounded-lg border border-ink-700 bg-ink-900/60 text-mist-500 transition-all hover:border-skyx-400/50 hover:text-skyx-400 active:scale-95"
+            >
+              <svg viewBox="0 0 16 16" className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="1.5">
+                <path d="M2 12L6 8l3 3 5-7" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            </button>
+            <button
+              type="button"
+              onClick={() => setOnboardingOpen(true)}
+              title="Interactive tour"
+              className="grid place-items-center w-8 h-8 rounded-lg border border-ink-700 bg-ink-900/60 text-mist-500 transition-all hover:border-ember-500/50 hover:text-ember-400 active:scale-95"
+            >
+              <svg viewBox="0 0 16 16" className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="1.5">
+                <circle cx="8" cy="8" r="6" />
+                <path d="M8 5v3l2 2" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            </button>
+            <button
+              type="button"
+              onClick={toggleTheme}
+              title={`Switch to ${theme === "dark" ? "light" : "dark"} mode`}
+              className="grid place-items-center w-8 h-8 rounded-lg border border-ink-700 bg-ink-900/60 text-mist-500 transition-all hover:border-mist-500/50 hover:text-mist-300 active:scale-95"
+            >
+              {theme === "dark" ? (
+                <svg viewBox="0 0 16 16" className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="1.5">
+                  <circle cx="8" cy="8" r="4" />
+                  <path d="M8 1v2M8 13v2M1 8h2M13 8h2M3.5 3.5l1.5 1.5M11 11l1.5 1.5M3.5 12.5l1.5-1.5M11 5l1.5-1.5" strokeLinecap="round" />
+                </svg>
+              ) : (
+                <svg viewBox="0 0 16 16" className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="1.5">
+                  <path d="M14 9.5A6.5 6.5 0 0 1 6.5 2 5.5 5.5 0 1 0 14 9.5z" />
+                </svg>
+              )}
             </button>
           </div>
 
@@ -978,7 +1087,7 @@ export default function App() {
         <div className="max-w-[1480px] mx-auto px-4 sm:px-6 py-3.5 flex flex-wrap items-center gap-x-6 gap-y-1.5 font-mono text-[11px] text-mist-600">
           <span className="flex items-center gap-2">
             <span className="led-live w-1.5 h-1.5 rounded-full bg-lagoon-400" />
-            forge v1.7.0 · spec devcontainers/v0.245.2 · toolchains + policy gates P1–P5
+            forge v1.8.0 · spec devcontainers/v0.245.2 · toolchains + policy gates P1–P5
           </span>
           <span className="hidden md:inline">manifest autosaves to this browser</span>
           <span className="sm:ml-auto">
@@ -1003,6 +1112,10 @@ export default function App() {
       )}
       <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} groups={commands} />
       <ShortcutsModal open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} />
+      <OnboardingTour open={onboardingOpen} onClose={() => setOnboardingOpen(false)} />
+      <TemplatePicker open={templatePickerOpen} onClose={() => setTemplatePickerOpen(false)} onSelect={applyTemplate} />
+      <ChangelogModal open={changelogOpen} onClose={() => setChangelogOpen(false)} />
+      <PerfDashboard open={perfDashboardOpen} onClose={() => setPerfDashboardOpen(false)} />
       <Toasts />
     </div>
   );
