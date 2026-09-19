@@ -4,6 +4,7 @@ import CommandPalette, { type PaletteGroup } from "./components/CommandPalette";
 import DryRunModal from "./components/DryRunModal";
 import LayerStack from "./components/LayerStack";
 import PolicyMatrix from "./components/PolicyMatrix";
+import ShortcutsModal from "./components/ShortcutsModal";
 import Toasts from "./components/Toasts";
 import {
   ChipInput,
@@ -54,6 +55,7 @@ export default function App() {
   const [runFailed, setRunFailed] = useState(false);
   const [scriptCopied, setScriptCopied] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const announcedRestore = useRef(false);
 
   const backend = useForgeBackend(cfg);
@@ -105,6 +107,70 @@ export default function App() {
     setRunFailed(false);
   };
 
+  // ── export/import manifest ─────────────────────────────────────────────
+  const exportManifest = () => {
+    const json = JSON.stringify(cfg, null, 2);
+    const blob = new Blob([json], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${cfg.owner}-${cfg.repo}-manifest.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 800);
+    toast("manifest exported");
+  };
+
+  const importManifest = () => {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = "application/json";
+    input.onchange = (e) => {
+      const file = (e.target as HTMLInputElement).files?.[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = (ev) => {
+        try {
+          const imported = JSON.parse(ev.target?.result as string) as Config;
+          setCfg(imported);
+          saveConfig(imported);
+          setVerified(false);
+          setRunFailed(false);
+          toast("manifest imported");
+        } catch {
+          toast("invalid manifest file");
+        }
+      };
+      reader.readAsText(file);
+    };
+    input.click();
+  };
+
+  // ── share URL ──────────────────────────────────────────────────────────
+  const shareURL = () => {
+    const encoded = btoa(JSON.stringify(cfg));
+    const url = `${window.location.origin}${window.location.pathname}#config=${encoded}`;
+    navigator.clipboard.writeText(url);
+    toast("share URL copied to clipboard");
+  };
+
+  // load from URL hash on mount
+  useEffect(() => {
+    const hash = window.location.hash;
+    if (hash.startsWith("#config=")) {
+      try {
+        const encoded = hash.slice(8);
+        const decoded = JSON.parse(atob(encoded)) as Config;
+        setCfg(decoded);
+        saveConfig(decoded);
+        toast("manifest loaded from share URL");
+      } catch {
+        toast("invalid share URL");
+      }
+    }
+  }, []);
+
   const essCount = bundle.essentialCount;
   const policies = bundle.policies;
   const enforcedCount = bundle.enforcedCount;
@@ -137,6 +203,17 @@ export default function App() {
 
   const keyHandler = useRef<(e: KeyboardEvent) => void>(() => {});
   keyHandler.current = (e) => {
+    // "?" opens shortcuts help (no modifier needed)
+    if (e.key === "?" && !e.metaKey && !e.ctrlKey && !e.altKey) {
+      const target = e.target as HTMLElement;
+      const isInput = target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable;
+      if (!isInput) {
+        e.preventDefault();
+        setShortcutsOpen(true);
+        return;
+      }
+    }
+
     const mod = e.metaKey || e.ctrlKey;
     if (!mod) return;
     if (e.key.toLowerCase() === "k") {
@@ -235,11 +312,56 @@ export default function App() {
             <div className="leading-tight min-w-0">
               <div className="font-display font-bold tracking-[0.04em] text-[15px] text-mist-100 whitespace-nowrap">
                 DEVCONTAINER <span className="text-ember-500">FORGE</span>
+                <span className="ml-2 text-[9px] font-mono font-normal text-mist-600 bg-ink-800 px-1.5 py-0.5 rounded border border-ink-700">
+                  v1.7.0
+                </span>
               </div>
               <div className="font-mono text-[10.5px] text-mist-600 truncate">
                 ghcr env setup · {cfg.owner}/{cfg.repo}
               </div>
             </div>
+          </div>
+
+          {/* Utility buttons */}
+          <div className="hidden lg:flex items-center gap-1.5">
+            <button
+              type="button"
+              onClick={exportManifest}
+              title="Export manifest as JSON"
+              className="grid place-items-center w-8 h-8 rounded-lg border border-ink-700 bg-ink-900/60 text-mist-500 transition-all hover:border-skyx-400/50 hover:text-skyx-400 active:scale-95"
+            >
+              <svg viewBox="0 0 16 16" className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="1.5">
+                <path d="M8 2v8m0 0 3-3M8 10 5 7M3 13.5h10" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            </button>
+            <button
+              type="button"
+              onClick={importManifest}
+              title="Import manifest from JSON"
+              className="grid place-items-center w-8 h-8 rounded-lg border border-ink-700 bg-ink-900/60 text-mist-500 transition-all hover:border-lagoon-500/50 hover:text-lagoon-400 active:scale-95"
+            >
+              <svg viewBox="0 0 16 16" className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="1.5">
+                <path d="M8 10V2m0 0 3 3M8 2 5 5M3 13.5h10" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            </button>
+            <button
+              type="button"
+              onClick={shareURL}
+              title="Copy shareable URL"
+              className="grid place-items-center w-8 h-8 rounded-lg border border-ink-700 bg-ink-900/60 text-mist-500 transition-all hover:border-ember-500/50 hover:text-ember-400 active:scale-95"
+            >
+              <svg viewBox="0 0 16 16" className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="1.5">
+                <path d="M6.5 9.5 9.5 6.5M6 11.5a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.5M10 4.5a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.5" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            </button>
+            <button
+              type="button"
+              onClick={() => setShortcutsOpen(true)}
+              title="Keyboard shortcuts"
+              className="grid place-items-center w-8 h-8 rounded-lg border border-ink-700 bg-ink-900/60 text-mist-500 transition-all hover:border-mist-500/50 hover:text-mist-300 active:scale-95"
+            >
+              <Kbd>?</Kbd>
+            </button>
           </div>
 
           <div className="ml-auto flex items-center gap-2.5">
@@ -880,6 +1002,7 @@ export default function App() {
         />
       )}
       <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} groups={commands} />
+      <ShortcutsModal open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} />
       <Toasts />
     </div>
   );
