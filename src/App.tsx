@@ -1,11 +1,16 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import AnalyticsDashboard from "./components/AnalyticsDashboard";
+import BackupRestoreSystem from "./components/BackupRestoreSystem";
 import ChangelogModal from "./components/ChangelogModal";
 import CodePanel, { type FileTab } from "./components/CodePanel";
 import CommandPalette, { type PaletteGroup } from "./components/CommandPalette";
 import CompareMode from "./components/CompareMode";
+import ConfigLinter from "./components/ConfigLinter";
+import ConfigValidator from "./components/ConfigValidator";
 import CostEstimation from "./components/CostEstimation";
 import DependencyGraph from "./components/DependencyGraph";
 import DryRunModal from "./components/DryRunModal";
+import ExportFormatSelector from "./components/ExportFormatSelector";
 import GitHubTemplateExport from "./components/GitHubTemplateExport";
 import HistoryTracker from "./components/HistoryTracker";
 import LayerStack from "./components/LayerStack";
@@ -376,7 +381,7 @@ export default function App() {
               <div className="font-display font-bold tracking-[0.04em] text-[15px] text-mist-100 whitespace-nowrap">
                 DEVCONTAINER <span className="text-ember-500">FORGE</span>
                 <span className="ml-2 text-[9px] font-mono font-normal text-mist-600 bg-ink-800 px-1.5 py-0.5 rounded border border-ink-700">
-                  v2.0.0
+                  v2.1.0
                 </span>
               </div>
               <div className="font-mono text-[10.5px] text-mist-600 truncate">
@@ -1140,6 +1145,11 @@ export default function App() {
               <CostEstimation config={cfg} />
               <DependencyGraph config={cfg} />
               <MultiEnvironmentSelector config={cfg} onApply={setCfg} />
+              <AnalyticsDashboard config={cfg} />
+              <ConfigValidator config={cfg} />
+              <ConfigLinter config={cfg} />
+              <ExportFormatSelector config={cfg} />
+              <BackupRestoreSystem currentConfig={cfg} onRestore={setCfg} />
             </div>
           </Reveal>
         </div>
@@ -1149,7 +1159,7 @@ export default function App() {
         <div className="max-w-[1480px] mx-auto px-4 sm:px-6 py-3.5 flex flex-wrap items-center gap-x-6 gap-y-1.5 font-mono text-[11px] text-mist-600">
           <span className="flex items-center gap-2">
             <span className="led-live w-1.5 h-1.5 rounded-full bg-lagoon-400" />
-            forge v2.0.0 · spec devcontainers/v0.245.2 · toolchains + policy gates P1–P5
+            forge v2.1.0 · spec devcontainers/v0.245.2 · analytics + validation + linting + export + backup
           </span>
           <span className="hidden md:inline">manifest autosaves to this browser</span>
           <span className="sm:ml-auto">
