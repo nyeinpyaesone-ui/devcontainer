@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import AIAssistantPanel from "./components/AIAssistantPanel";
 import AnalyticsDashboard from "./components/AnalyticsDashboard";
 import BackupRestoreSystem from "./components/BackupRestoreSystem";
 import BashPlayground from "./components/BashPlayground";
@@ -88,6 +89,7 @@ export default function App() {
   const [githubTemplateOpen, setGithubTemplateOpen] = useState(false);
   const [bashPlaygroundOpen, setBashPlaygroundOpen] = useState(false);
   const [wizardOpen, setWizardOpen] = useState(false);
+  const [aiAssistantOpen, setAiAssistantOpen] = useState(false);
   const announcedRestore = useRef(false);
   const announcedOnboarding = useRef(false);
 
@@ -401,7 +403,7 @@ export default function App() {
               <div className="font-display font-bold tracking-[0.04em] text-[15px] text-mist-100 whitespace-nowrap">
                 DEVCONTAINER <span className="text-ember-500">FORGE</span>
                 <span className="ml-2 text-[9px] font-mono font-normal text-mist-600 bg-ink-800 px-1.5 py-0.5 rounded border border-ink-700">
-                  v2.2.0
+                  v2.3.0
                 </span>
               </div>
               <div className="font-mono text-[10.5px] text-mist-600 truncate">
@@ -520,6 +522,19 @@ export default function App() {
               <svg viewBox="0 0 16 16" className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="1.5">
                 <path d="M8 1L2 4v4c0 3.5 2.5 6.5 6 7.5 3.5-1 6-4 6-7.5V4L8 1z" strokeLinejoin="round" />
                 <path d="M6 8l2 2 4-4" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            </button>
+            <button
+              type="button"
+              onClick={() => setAiAssistantOpen(true)}
+              title="AI Configuration Assistant"
+              className="grid place-items-center w-8 h-8 rounded-lg border border-ink-700 bg-ink-900/60 text-mist-500 transition-all hover:border-purple-500/50 hover:text-purple-400 active:scale-95"
+            >
+              <svg viewBox="0 0 16 16" className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="1.5">
+                <circle cx="8" cy="8" r="6" />
+                <circle cx="6" cy="7" r="1" fill="currentColor" />
+                <circle cx="10" cy="7" r="1" fill="currentColor" />
+                <path d="M6 10c0.5 0.5 1 0.75 2 0.75s1.5-0.25 2-0.75" strokeLinecap="round" />
               </svg>
             </button>
             <button
@@ -1201,7 +1216,7 @@ export default function App() {
         <div className="max-w-[1480px] mx-auto px-4 sm:px-6 py-3.5 flex flex-wrap items-center gap-x-6 gap-y-1.5 font-mono text-[11px] text-mist-600">
           <span className="flex items-center gap-2">
             <span className="led-live w-1.5 h-1.5 rounded-full bg-lagoon-400" />
-            forge v2.2.0 · spec devcontainers/v0.245.2 · interactive playground + wizard + custom rules + PWA
+            forge v2.3.0 · spec devcontainers/v0.245.2 · AI-powered intelligence + pattern recognition + natural language
           </span>
           <span className="hidden md:inline">manifest autosaves to this browser</span>
           <span className="sm:ml-auto">
@@ -1235,6 +1250,7 @@ export default function App() {
       {githubTemplateOpen && <GitHubTemplateExport config={cfg} onClose={() => setGithubTemplateOpen(false)} />}
       {bashPlaygroundOpen && <BashPlayground onClose={() => setBashPlaygroundOpen(false)} />}
       {wizardOpen && <ConfigurationWizard onComplete={(newConfig) => { setCfg(newConfig); setWizardOpen(false); toast("Configuration applied from wizard"); }} onClose={() => setWizardOpen(false)} />}
+      <AIAssistantPanel config={cfg} isOpen={aiAssistantOpen} onClose={() => setAiAssistantOpen(false)} />
       <Toasts />
     </div>
   );
