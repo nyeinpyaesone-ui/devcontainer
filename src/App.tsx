@@ -2,7 +2,9 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import ChangelogModal from "./components/ChangelogModal";
 import CodePanel, { type FileTab } from "./components/CodePanel";
 import CommandPalette, { type PaletteGroup } from "./components/CommandPalette";
+import CompareMode from "./components/CompareMode";
 import DryRunModal from "./components/DryRunModal";
+import HistoryTracker from "./components/HistoryTracker";
 import LayerStack from "./components/LayerStack";
 import OnboardingTour from "./components/OnboardingTour";
 import PerfDashboard from "./components/PerfDashboard";
@@ -67,6 +69,7 @@ export default function App() {
   const [templatePickerOpen, setTemplatePickerOpen] = useState(false);
   const [changelogOpen, setChangelogOpen] = useState(false);
   const [perfDashboardOpen, setPerfDashboardOpen] = useState(false);
+  const [compareOpen, setCompareOpen] = useState(false);
   const announcedRestore = useRef(false);
   const announcedOnboarding = useRef(false);
 
@@ -224,6 +227,11 @@ export default function App() {
     { name: "Dockerfile", lang: "dockerfile", badge: "docker", content: arts.dockerfile },
     { name: "validate-devcontainer.yml", lang: "yaml", badge: "ci", content: arts.workflow },
     { name: "quickstart.sh", lang: "bash", badge: "sh", content: arts.quickstart },
+    { name: "docker-compose.yml", lang: "yaml", badge: "compose", content: arts.compose },
+    { name: "README.md", lang: "markdown", badge: "docs", content: arts.readme },
+    { name: ".env.example", lang: "bash", badge: "env", content: arts.envExample },
+    { name: "Makefile", lang: "makefile", badge: "make", content: arts.makefile },
+    { name: "ci-matrix.yml", lang: "yaml", badge: "matrix", content: arts.actionsMatrix },
   ];
 
   const copyScript = async () => {
@@ -361,7 +369,7 @@ export default function App() {
               <div className="font-display font-bold tracking-[0.04em] text-[15px] text-mist-100 whitespace-nowrap">
                 DEVCONTAINER <span className="text-ember-500">FORGE</span>
                 <span className="ml-2 text-[9px] font-mono font-normal text-mist-600 bg-ink-800 px-1.5 py-0.5 rounded border border-ink-700">
-                  v1.8.0
+                  v1.9.0
                 </span>
               </div>
               <div className="font-mono text-[10.5px] text-mist-600 truncate">
@@ -471,6 +479,23 @@ export default function App() {
                 </svg>
               )}
             </button>
+            <button
+              type="button"
+              onClick={() => setCompareOpen(true)}
+              title="Compare configurations"
+              className="grid place-items-center w-8 h-8 rounded-lg border border-ink-700 bg-ink-900/60 text-mist-500 transition-all hover:border-skyx-400/50 hover:text-skyx-400 active:scale-95"
+            >
+              <svg viewBox="0 0 16 16" className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="1.5">
+                <path d="M2 4h12M2 8h8M2 12h10" strokeLinecap="round" />
+              </svg>
+            </button>
+            <HistoryTracker
+              currentConfig={cfg}
+              onRestore={(restoredConfig) => {
+                setCfg(restoredConfig);
+                toast("Configuration restored from history");
+              }}
+            />
           </div>
 
           <div className="ml-auto flex items-center gap-2.5">
@@ -1087,7 +1112,7 @@ export default function App() {
         <div className="max-w-[1480px] mx-auto px-4 sm:px-6 py-3.5 flex flex-wrap items-center gap-x-6 gap-y-1.5 font-mono text-[11px] text-mist-600">
           <span className="flex items-center gap-2">
             <span className="led-live w-1.5 h-1.5 rounded-full bg-lagoon-400" />
-            forge v1.8.0 · spec devcontainers/v0.245.2 · toolchains + policy gates P1–P5
+            forge v1.9.0 · spec devcontainers/v0.245.2 · toolchains + policy gates P1–P5
           </span>
           <span className="hidden md:inline">manifest autosaves to this browser</span>
           <span className="sm:ml-auto">
@@ -1116,6 +1141,7 @@ export default function App() {
       <TemplatePicker open={templatePickerOpen} onClose={() => setTemplatePickerOpen(false)} onSelect={applyTemplate} />
       <ChangelogModal open={changelogOpen} onClose={() => setChangelogOpen(false)} />
       <PerfDashboard open={perfDashboardOpen} onClose={() => setPerfDashboardOpen(false)} />
+      <CompareMode currentConfig={cfg} onClose={() => setCompareOpen(false)} />
       <Toasts />
     </div>
   );

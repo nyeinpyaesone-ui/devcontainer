@@ -4,6 +4,11 @@
 // ────────────────────────────────────────────────────────────────────────────
 import { byteSize, formatDuration, shortHash } from "../services/format";
 import { defineStore } from "../services/persistence";
+import { buildDockerCompose } from "./docker-compose";
+import { buildReadme } from "./readme";
+import { buildEnvExample } from "./env-schema";
+import { buildMakefile } from "./makefile";
+import { buildActionsMatrix } from "./actions-matrix";
 
 export interface FeatureDef {
   id: string;
@@ -1290,6 +1295,11 @@ export interface Artifacts {
   dockerfile: string;
   quickstart: string;
   workflow: string;
+  compose: string;
+  readme: string;
+  envExample: string;
+  makefile: string;
+  actionsMatrix: string;
 }
 
 export function buildArtifacts(c: Config): Artifacts {
@@ -1302,6 +1312,11 @@ export function buildArtifacts(c: Config): Artifacts {
     dockerfile,
     quickstart: buildQuickstart(c),
     workflow,
+    compose: buildDockerCompose(c),
+    readme: buildReadme(c),
+    envExample: buildEnvExample(c),
+    makefile: buildMakefile(c),
+    actionsMatrix: buildActionsMatrix(c),
   };
 }
 
