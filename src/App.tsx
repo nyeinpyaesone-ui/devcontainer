@@ -24,6 +24,7 @@ import PerfDashboard from "./components/PerfDashboard";
 import { PerformanceProfiler } from "./components/PerformanceProfiler";
 import PolicyMatrix from "./components/PolicyMatrix";
 import { CollaborationPanel } from "./components/CollaborationPanel";
+import { VersionControlPanel } from "./components/VersionControlPanel";
 import SecurityAuditModal from "./components/SecurityAuditModal";
 import ShortcutsModal from "./components/ShortcutsModal";
 import SprintFlowchart from "./components/SprintFlowchart";
@@ -96,6 +97,7 @@ export default function App() {
   const [visualBuilderOpen, setVisualBuilderOpen] = useState(false);
   const [performanceProfilerOpen, setPerformanceProfilerOpen] = useState(false);
   const [collaborationOpen, setCollaborationOpen] = useState(false);
+  const [versionControlOpen, setVersionControlOpen] = useState(false);
   const announcedRestore = useRef(false);
   const announcedOnboarding = useRef(false);
 
@@ -409,7 +411,7 @@ export default function App() {
               <div className="font-display font-bold tracking-[0.04em] text-[15px] text-mist-100 whitespace-nowrap">
                 DEVCONTAINER <span className="text-ember-500">FORGE</span>
                 <span className="ml-2 text-[9px] font-mono font-normal text-mist-600 bg-ink-800 px-1.5 py-0.5 rounded border border-ink-700">
-                  v2.7.0
+                  v2.8.0
                 </span>
               </div>
               <div className="font-mono text-[10.5px] text-mist-600 truncate">
@@ -1261,7 +1263,7 @@ export default function App() {
         <div className="max-w-[1480px] mx-auto px-4 sm:px-6 py-3.5 flex flex-wrap items-center gap-x-6 gap-y-1.5 font-mono text-[11px] text-mist-600">
           <span className="flex items-center gap-2">
             <span className="led-live w-1.5 h-1.5 rounded-full bg-lagoon-400" />
-            forge v2.7.0 · spec devcontainers/v0.245.2 · real-time collaboration + performance profiler + advanced analytics + AI insights
+            forge v2.8.0 · spec devcontainers/v0.245.2 · version control + real-time collaboration + performance profiler + advanced analytics + AI insights
           </span>
           <span className="hidden md:inline">manifest autosaves to this browser</span>
           <span className="sm:ml-auto">
@@ -1299,6 +1301,7 @@ export default function App() {
       <VisualBuilder config={cfg} onConfigChange={setCfg} isOpen={visualBuilderOpen} onClose={() => setVisualBuilderOpen(false)} />
       <PerformanceProfiler config={cfg} isOpen={performanceProfilerOpen} onClose={() => setPerformanceProfilerOpen(false)} />
       <CollaborationPanel config={cfg} onConfigChange={setCfg} isOpen={collaborationOpen} onClose={() => setCollaborationOpen(false)} />
+      <VersionControlPanel config={cfg} onConfigChange={setCfg} isOpen={versionControlOpen} onClose={() => setVersionControlOpen(false)} />
       <Toasts />
     </div>
   );
