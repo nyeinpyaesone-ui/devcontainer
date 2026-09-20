@@ -2,7 +2,7 @@ import type { ReactNode } from "react";
 
 // Lightweight line-based tokenizer → React spans. No innerHTML, no deps.
 
-export type Lang = "bash" | "json" | "dockerfile" | "yaml";
+export type Lang = "bash" | "json" | "dockerfile" | "yaml" | "markdown" | "makefile";
 
 const BASH_RE =
   /(#.*$)|("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*')|(\$\{[^}]*\}|\$[A-Za-z_]\w*|\$\?|\$\*)|\b(if|then|else|elif|fi|for|while|do|done|case|esac|in|function|set|export|local|readonly|trap|exit|return|umask|shift)\b|\b(echo|printf|cd|mkdir|chmod|command|docker|git|cat|curl|bash|sh|zsh|source|exec|read|numfmt|tr|awk|grep|wc|sudo|apt-get|npm|npx|node|devcontainer|code|install|pull|login|run|clone|image|info|export|die|ok|log|warn|chmod)\b|(^|\s)(--?[A-Za-z][\w-]*)|(\b\d+(?:\.\d+)?\b)/g;
@@ -90,6 +90,31 @@ const YAML_GROUPS: (string | null)[] = [
   "tk-n", // 8 number
 ];
 
+const MARKDOWN_RE =
+  /^(#{1,6}\s)|(\*\*[^*]+\*\*|__[^_]+__)|(\*[^*]+\*|_[^_]+_)|(`[^`]+`)|(\[[^\]]+\]\([^)]+\))|(^>\s)|(^-\s|^\d+\.\s)|(\[x\]|\[ \])/gi;
+
+const MARKDOWN_GROUPS: (string | null)[] = [
+  "tk-k", // 1 heading
+  "tk-b", // 2 bold
+  "tk-f", // 3 italic
+  "tk-s", // 4 inline code
+  "tk-v", // 5 link
+  "tk-c", // 6 blockquote
+  "tk-p", // 7 list marker
+  "tk-n", // 8 checkbox
+];
+
+const MAKEFILE_RE =
+  /(#.*$)|(^[\w-]+(?=\s*:))|(^\t.+)|(\$\([^)]+\)|\$\{[^}]+\})|(\bPHONY\b|\bSHELL\b|\bMAKE\b)/g;
+
+const MAKEFILE_GROUPS: (string | null)[] = [
+  "tk-c", // 1 comment
+  "tk-key", // 2 target
+  "tk-b", // 3 recipe
+  "tk-v", // 4 variable
+  "tk-k", // 5 special
+];
+
 // Bounded memoization: identical (lang, line) pairs tokenize once. Lines are
 // immutable strings, so this is safe; we cap the cache to bound memory.
 const hlCache = new Map<string, ReactNode>();
@@ -104,6 +129,8 @@ export function highlightLine(line: string, lang: Lang): ReactNode {
   if (lang === "json") node = tokenize(line, JSON_RE, JSON_GROUPS);
   else if (lang === "dockerfile") node = tokenize(line, DOCKER_RE, DOCKER_GROUPS);
   else if (lang === "yaml") node = tokenize(line, YAML_RE, YAML_GROUPS);
+  else if (lang === "markdown") node = tokenize(line, MARKDOWN_RE, MARKDOWN_GROUPS);
+  else if (lang === "makefile") node = tokenize(line, MAKEFILE_RE, MAKEFILE_GROUPS);
   else node = tokenize(line, BASH_RE, BASH_GROUPS);
   
   // LRU-style eviction: when cache is full, remove oldest half to prevent memory bloat

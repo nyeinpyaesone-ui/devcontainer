@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { fuzzyParts, type FuzzyMatch, type FuzzyPart } from "../services/fuzzy";
 import { Kbd } from "./ui";
 
 export interface PaletteItem {
@@ -36,18 +37,22 @@ export default function CommandPalette({
   }, [open]);
 
   const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase();
+    const q = query.trim();
     return groups
-      .map((g) => ({
-        ...g,
-        items: g.items.filter(
-          (i) =>
-            !q ||
-            i.label.toLowerCase().includes(q) ||
-            (i.keywords ?? "").toLowerCase().includes(q) ||
-            (i.hint ?? "").toLowerCase().includes(q)
-        ),
-      }))
+      .map((g) => {
+        const scored = g.items
+          .map((i) => ({
+            i,
+            m: fuzzyParts(q, `${i.label} ${i.keywords ?? ""} ${i.hint ?? ""}`) as FuzzyMatch | null,
+          }))
+          .filter((x): x is { i: PaletteItem; m: FuzzyMatch } => x.m !== null)
+          .sort((a, b) => b.m.score - a.m.score);
+        return {
+          title: g.title,
+          items: scored.map((x) => x.i),
+          parts: new Map<string, FuzzyPart[]>(scored.map((x) => [x.i.id, x.m.parts])),
+        };
+      })
       .filter((g) => g.items.length > 0);
   }, [groups, query]);
 
@@ -154,7 +159,15 @@ export default function CommandPalette({
                         isActive ? "text-ember-200" : "text-mist-200"
                       }`}
                     >
-                      {it.label}
+                      {(g.parts.get(it.id) ?? [{ text: it.label, hit: false }]).map((p, pi) =>
+                        p.hit ? (
+                          <span key={pi} className="text-ember-400 font-semibold">
+                            {p.text}
+                          </span>
+                        ) : (
+                          <span key={pi}>{p.text}</span>
+                        )
+                      )}
                     </span>
                     {it.hint && <span className="font-mono text-[10.5px] text-mist-600">{it.hint}</span>}
                     {it.kbd && (

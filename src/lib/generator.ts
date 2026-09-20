@@ -2,6 +2,13 @@
 // Generator core: config model + artifact builders for the GHCR devcontainer
 // environment of nyeinpyaesone-ui/ERP.
 // ────────────────────────────────────────────────────────────────────────────
+import { byteSize, formatDuration, shortHash } from "../services/format";
+import { defineStore } from "../services/persistence";
+import { buildDockerCompose } from "./docker-compose";
+import { buildReadme } from "./readme";
+import { buildEnvExample } from "./env-schema";
+import { buildMakefile } from "./makefile";
+import { buildActionsMatrix } from "./actions-matrix";
 
 export interface FeatureDef {
   id: string;
@@ -27,6 +34,16 @@ export interface Enforcement {
   secretsGuard: boolean;
   preCommit: boolean;
   schemaGate: boolean;
+}
+
+export type CloneStrategy = "off" | "shallow" | "partial" | "full";
+
+export interface GitTuning {
+  protocolV2: boolean;
+  commitGraph: boolean;
+  maintenance: boolean;
+  sshSign: boolean;
+  bundle: boolean;
 }
 
 export interface ToolGroup {
@@ -63,10 +80,20 @@ export interface Config {
   langs: LangChain[];
   namedVolume: boolean;
   smokeTest: boolean;
-  cloneRepo: boolean;
+  clone: CloneStrategy;
+  git: GitTuning;
   aptExtra: string;
   enforce: Enforcement;
 }
+
+export const gitTuningCount = (c: Config) => Object.values(c.git).filter(Boolean).length;
+
+export const cloneLabel: Record<CloneStrategy, string> = {
+  off: "existing workspace",
+  shallow: "shallow · depth 1",
+  partial: "partial · blob:none",
+  full: "full history",
+};
 
 export const DEFAULT_CONFIG: Config = {
   owner: "nyeinpyaesone-ui",
@@ -274,7 +301,14 @@ export const DEFAULT_CONFIG: Config = {
   ],
   namedVolume: true,
   smokeTest: true,
-  cloneRepo: true,
+  clone: "shallow",
+  git: {
+    protocolV2: true,
+    commitGraph: true,
+    maintenance: true,
+    sshSign: false,
+    bundle: false,
+  },
   aptExtra: "postgresql-client, redis-tools",
   enforce: {
     nonRoot: true,
@@ -507,7 +541,7 @@ export function readiness(c: Config): Readiness {
   const tools = activeToolGroups(c);
   const enforced = policyMatrix(c).filter((p) => p.status === "enforced").length;
   const items: ReadinessItem[] = [
-    { label: "repo clone wired", pts: 10, on: c.cloneRepo },
+    { label: "repo clone wired", pts: 10, on: c.clone !== "off" },
     { label: "runtime features", pts: 14, on: feats.length > 0 },
     { label: "toolchains pinned", pts: 12, on: langs.length > 0 },
     { label: "essential tooling", pts: 12, on: tools.length >= 2 },
@@ -635,7 +669,7 @@ export function buildDockerfile(c: Config): string {
 
 // ── setup-env.sh ─────────────────────────────────────────────────────────────
 
-export function buildSetupScript(c: Config, json: string, dockerfile: string): string {
+export function buildSetupScript(c: Config, json: string, dockerfile: string, workflow: string): string {
   const feats = activeFeatures(c);
   const steps = activeSteps(c);
   const img = imageRef(c);
@@ -667,7 +701,30 @@ export function buildSetupScript(c: Config, json: string, dockerfile: string): s
     `IMAGE_REF="\${GHCR_REGISTRY}/\${REPO_OWNER,,}/\${REPO_NAME,,}:\${IMAGE_TAG}"`,
     `PROJECT_DIR="\${PROJECT_DIR:-$PWD/\${REPO_NAME}}"`,
     `DEVCONTAINER_DIR="\${PROJECT_DIR}/.devcontainer"`,
-    `CLONE_REPO="${c.cloneRepo ? 1 : 0}"`,
+    `CLONE_STRATEGY="${c.clone}"`,
+    ``,
+    `# ── flags ────────────────────────────────────────────────────────────`,
+    `#   --regenerate   re-run all seven sprint phases without re-cloning`,
+    `#   --skip-clone   do not clone even if the workspace is missing`,
+    `#   --dry-run      print what would happen, then exit`,
+    `REGENERATE=0; SKIP_CLONE=0; DRY_RUN=0`,
+    `for arg in "$@"; do`,
+    `  case "$arg" in`,
+    `    --regenerate) REGENERATE=1 ;;`,
+    `    --skip-clone) SKIP_CLONE=1 ;;`,
+    `    --dry-run)    DRY_RUN=1 ;;`,
+    `    -h|--help)`,
+    `      printf 'usage: setup-env.sh [--regenerate] [--skip-clone] [--dry-run]\\n'`,
+    `      exit 0 ;;`,
+    `    *) die "unknown flag: $arg" ;;`,
+    `  esac`,
+    `done`,
+    `if [ "$DRY_RUN" = "1" ]; then`,
+    `  log "dry-run: would pull \${IMAGE_REF}, clone \${REPO_OWNER}/\${REPO_NAME}, write .devcontainer/"`,
+    `  log "dry-run: ${activeLangs(c).length ? `toolchains: ${activeLangs(c).map((l) => l.label.toLowerCase() + " " + l.version).join(" · ")}` : "no toolchains pinned"}"`,
+    `  log "dry-run: ${policyMatrix(c).filter((p) => p.status === "enforced").length} policy gates armed"`,
+    `  exit 0`,
+    `fi`,
     ``,
     `# ── ui helpers ───────────────────────────────────────────────────────`,
     `if [ -t 1 ]; then`,
@@ -720,19 +777,48 @@ export function buildSetupScript(c: Config, json: string, dockerfile: string): s
   );
 
   push(
-    `# ── step 4 · clone repo & scaffold workspace ─────────────────────────`,
+    `# ── step 4 · clone repo (${cloneLabel[c.clone]}) ─────────────────────`,
     `if [ -d "\${PROJECT_DIR}/.git" ]; then`,
     `  ok "workspace already present at \${PROJECT_DIR}"`,
-    `elif [ "$CLONE_REPO" = "1" ]; then`,
-    `  log "cloning github.com/\${REPO_OWNER}/\${REPO_NAME} (depth 1)"`,
-    `  git clone --depth 1 "https://github.com/\${REPO_OWNER}/\${REPO_NAME}.git" "$PROJECT_DIR"`,
-    `  ok "cloned → \${PROJECT_DIR}"`,
+    `elif [ "$CLONE_STRATEGY" = "off" ]; then`,
+    `  die "workspace not found at \${PROJECT_DIR} — clone strategy is 'off'"`,
     `else`,
-    `  die "workspace not found at \${PROJECT_DIR} — cloning is disabled in the manifest"`,
+    `  case "$CLONE_STRATEGY" in`,
+    `    shallow) CLONE_FLAGS="--depth 1" ;;`,
+    `    partial) CLONE_FLAGS="--filter=blob:none" ;;`,
+    `    *)       CLONE_FLAGS="" ;;`,
+    `  esac`,
+    `  log "cloning github.com/\${REPO_OWNER}/\${REPO_NAME} (\${CLONE_STRATEGY})"`,
+    `  # shellcheck disable=SC2086`,
+    `  git clone $CLONE_FLAGS "https://github.com/\${REPO_OWNER}/\${REPO_NAME}.git" "$PROJECT_DIR"`,
+    `  ok "cloned → \${PROJECT_DIR}"`,
     `fi`,
-    `mkdir -p "$DEVCONTAINER_DIR"`,
     ``
   );
+
+  // git performance tuning — repo-local config keeps future clones/fetches fast
+  const tuning: Array<[keyof GitTuning, string, string]> = [
+    ["protocolV2", "protocol.version", "2"],
+    ["commitGraph", "core.commitGraph", "true"],
+    ["maintenance", "maintenance.auto", "true"],
+    ["sshSign", "gpg.format", "ssh"],
+  ];
+  const activeTuning = tuning.filter(([k]) => c.git[k]);
+  if (activeTuning.length || c.git.bundle) {
+    push(`# ── git performance tuning ──────────────────────────────────────────`);
+    for (const [, key, val] of activeTuning) {
+      push(`git -C "$PROJECT_DIR" config ${key} ${val} 2>/dev/null || true`);
+    }
+    if (c.git.commitGraph) {
+      push(`git -C "$PROJECT_DIR" commit-graph write --reachable 2>/dev/null || true`);
+    }
+    if (c.git.bundle) {
+      push(`warn "bundle-uri enabled — set fetch.bundleUri.<id>.uri in .git/config to activate"`);
+    }
+    push(`ok "git tuning applied (${gitTuningCount(c)} settings)"`, ``);
+  }
+
+  push(`mkdir -p "$DEVCONTAINER_DIR"`, ``);
 
   push(
     `# ── step 5 · write devcontainer.json ─────────────────────────────────`,
@@ -896,6 +982,177 @@ export function buildSetupScript(c: Config, json: string, dockerfile: string): s
     push(`# P5 · schema gate (disabled)`, `warn "P5 · config errors will only surface on 'devcontainer up'"`, ``);
   }
 
+  // ── !sprint-setup · stamp sprint metadata ──────────────────────────────
+  push(
+    `# ── !sprint-setup · stamp sprint metadata ────────────────────────────`,
+    `log "stamping sprint metadata"`,
+    `cat > "\${DEVCONTAINER_DIR}/sprint.json" <<SPRINT_JSON`,
+    `{`,
+    `  "repo": "\${REPO_OWNER}/\${REPO_NAME}",`,
+    `  "image": "\${IMAGE_REF}",`,
+    `  "base": "${c.base}",`,
+    `  "shell": "${c.shell}",`,
+    `  "remoteUser": "${c.remoteUser}",`,
+    `  "features": ${JSON.stringify(feats.map((f) => f.ref.split("/").pop()))},`,
+    `  "toolchains": ${JSON.stringify(activeLangs(c).map((l) => `${l.label.toLowerCase()} ${l.version}`))},`,
+    `  "essentialPkgs": ${essentialPkgs(c).length},`,
+    `  "policyGates": ${policyMatrix(c).filter((p) => p.status === "enforced").length},`,
+    `  "generated": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",`,
+    `  "manifestHash": "$(echo "$0" | sha256sum | cut -c1-8)"`,
+    `}`,
+    `SPRINT_JSON`,
+    `ok "sprint.json stamped"`,
+    ``
+  );
+
+  // ── !env-setup · probe toolchains via docker run ───────────────────────
+  if (activeLangs(c).length) {
+    push(
+      `# ── !env-setup · probe toolchains in the image ───────────────────────`,
+      `log "probing toolchains in \${IMAGE_REF}"`,
+      `docker run --rm "$IMAGE_REF" sh -lc '`,
+      ...activeLangs(c).map((l) => `  ${l.verify} 2>/dev/null && echo "✔ ${l.label.toLowerCase()} ${l.version}" || echo "✖ ${l.label.toLowerCase()} missing"`,),
+      `' || warn "toolchain probe failed — image may be stale"`,
+      ``
+    );
+  }
+
+  // ── !dev-flow · write dev-flow.md ──────────────────────────────────────
+  push(
+    `# ── !dev-flow · write dev-flow.md ────────────────────────────────────`,
+    `log "writing dev-flow.md"`,
+    `cat > "\${PROJECT_DIR}/dev-flow.md" <<'DEV_FLOW_MD'`,
+    `# Dev Flow · ${c.owner}/${c.repo}`,
+    ``,
+    `## Quick start`,
+    `1. Open this folder in VS Code`,
+    `2. Ctrl/Cmd+Shift+P → "Dev Containers: Reopen in Container"`,
+    `3. Wait for features to install and post-create to run`,
+    ``,
+    `## Daily workflow`,
+    `- Pull latest: \`git pull --rebase\``,
+    `- Install deps: \`npm ci\` (or your package manager)`,
+    `- Run dev server: \`npm run dev\``,
+    `- Run tests: \`npm test\``,
+    `- Build: \`npm run build\``,
+    ``,
+    `## Ports`,
+    ...c.ports.map((p) => `- :${p} → http://localhost:${p}`),
+    ``,
+    `## Troubleshooting`,
+    `- If the container won't start: \`devcontainer down && devcontainer up\``,
+    `- If node_modules is stale: delete it and re-run post-create`,
+    `- If features fail to install: check \`.devcontainer/devcontainer.json\` for typos`,
+    `DEV_FLOW_MD`,
+    `ok "dev-flow.md written to workspace root"`,
+    ``
+  );
+
+  // ── !qa · write qa-checklist.md ────────────────────────────────────────
+  const policies = policyMatrix(c);
+  const enforced = policies.filter((p) => p.status === "enforced");
+  push(
+    `# ── !qa · write qa-checklist.md ──────────────────────────────────────`,
+    `log "writing qa-checklist.md"`,
+    `cat > "\${DEVCONTAINER_DIR}/qa-checklist.md" <<'QA_CHECKLIST_MD'`,
+    `# QA Checklist · ${c.owner}/${c.repo}`,
+    ``,
+    `## Policy gates (enforced: ${enforced.length}/${policies.length})`,
+    ...policies.map((p) => `- [${p.status === "enforced" ? "x" : " "}] **${p.id} · ${p.label}** — ${p.detail}`),
+    ``,
+    `## Smoke tests`,
+    `- [ ] Image pulls successfully`,
+    `- [ ] Container starts as ${c.remoteUser}`,
+    ...activeLangs(c).map((l) => `- [ ] ${l.label} ${l.version} verified`),
+    `- [ ] Forwarded ports respond`,
+    `- [ ] Post-create pipeline completes`,
+    ``,
+    `## Review criteria`,
+    `- devcontainer.json is valid JSON`,
+    `- Dockerfile builds without warnings`,
+    `- No secrets in .env files (P3)`,
+    `- Pre-commit hook refuses staged .env (P4)`,
+    `QA_CHECKLIST_MD`,
+    `ok "qa-checklist.md written"`,
+    ``
+  );
+
+  // ── !code-review · write CI workflow ───────────────────────────────────
+  const workflowLines = workflow.split("\n").map((line: string) => (line ? `    ${line}` : ``));
+  push(
+    `# ── !code-review · write CI workflow ─────────────────────────────────`,
+    `log "writing .github/workflows/validate-devcontainer.yml"`,
+    `mkdir -p "\${PROJECT_DIR}/.github/workflows"`,
+    `cat > "\${PROJECT_DIR}/.github/workflows/validate-devcontainer.yml" <<'CI_WORKFLOW_YML'`,
+    ...workflowLines,
+    `CI_WORKFLOW_YML`,
+    `ok "CI workflow written"`,
+    ``
+  );
+
+  // ── !cicd · write BOOTSTRAP.md ─────────────────────────────────────────
+  push(
+    `# ── !cicd · write BOOTSTRAP.md ───────────────────────────────────────`,
+    `log "writing BOOTSTRAP.md"`,
+    `cat > "\${PROJECT_DIR}/BOOTSTRAP.md" <<'BOOTSTRAP_MD'`,
+    `# Bootstrap · ${c.owner}/${c.repo}`,
+    ``,
+    `## One-liner install`,
+    `\`\`\`bash`,
+    `${bootstrapLine(c)}`,
+    `\`\`\``,
+    ``,
+    `## Manual setup`,
+    `1. Clone this repo: \`git clone https://github.com/${c.owner}/${c.repo}.git\``,
+    `2. Run the setup script: \`chmod +x setup-env.sh && ./setup-env.sh\``,
+    `3. Open in VS Code and reopen in container`,
+    ``,
+    `## Flags`,
+    `- \`--regenerate\` — re-run all seven sprint phases without re-cloning`,
+    `- \`--skip-clone\` — do not clone even if the workspace is missing`,
+    `- \`--dry-run\` — print what would happen, then exit`,
+    `BOOTSTRAP_MD`,
+    `ok "BOOTSTRAP.md written"`,
+    ``
+  );
+
+  // ── !maintenance · write MAINTENANCE.md ────────────────────────────────
+  push(
+    `# ── !maintenance · write MAINTENANCE.md ──────────────────────────────`,
+    `log "writing MAINTENANCE.md"`,
+    `cat > "\${DEVCONTAINER_DIR}/MAINTENANCE.md" <<'MAINTENANCE_MD'`,
+    `# Maintenance · ${c.owner}/${c.repo}`,
+    ``,
+    `## Regenerating the environment`,
+    `This environment was generated by the GHCR Devcontainer Forge.`,
+    `To regenerate:`,
+    `1. Edit the manifest in the forge UI`,
+    `2. Download the new setup-env.sh`,
+    `3. Run \`./setup-env.sh --regenerate\``,
+    ``,
+    `## What gets regenerated`,
+    `- .devcontainer/devcontainer.json`,
+    `- .devcontainer/Dockerfile`,
+    `- .devcontainer/sprint.json`,
+    `- .devcontainer/qa-checklist.md`,
+    `- .devcontainer/MAINTENANCE.md`,
+    `- .github/workflows/validate-devcontainer.yml`,
+    `- dev-flow.md`,
+    `- BOOTSTRAP.md`,
+    ``,
+    `## What does NOT get regenerated`,
+    `- node_modules (preserved via named volume)`,
+    `- .env files (preserved for security)`,
+    `- git history`,
+    ``,
+    `## Manifest hash`,
+    `Check .devcontainer/sprint.json for the current manifest hash.`,
+    `If this hash changes, the environment config has been updated.`,
+    `MAINTENANCE_MD`,
+    `ok "MAINTENANCE.md written"`,
+    ``
+  );
+
   push(
     `# ── done ────────────────────────────────────────────────────────────`,
     `ok "artifacts written to \${DEVCONTAINER_DIR}"`,
@@ -1038,17 +1295,28 @@ export interface Artifacts {
   dockerfile: string;
   quickstart: string;
   workflow: string;
+  compose: string;
+  readme: string;
+  envExample: string;
+  makefile: string;
+  actionsMatrix: string;
 }
 
 export function buildArtifacts(c: Config): Artifacts {
   const json = buildDevcontainerJson(c);
   const dockerfile = buildDockerfile(c);
+  const workflow = buildWorkflow(c);
   return {
-    setup: buildSetupScript(c, json, dockerfile),
+    setup: buildSetupScript(c, json, dockerfile, workflow),
     json,
     dockerfile,
     quickstart: buildQuickstart(c),
-    workflow: buildWorkflow(c),
+    workflow,
+    compose: buildDockerCompose(c),
+    readme: buildReadme(c),
+    envExample: buildEnvExample(c),
+    makefile: buildMakefile(c),
+    actionsMatrix: buildActionsMatrix(c),
   };
 }
 
@@ -1103,24 +1371,9 @@ export function estimateSeconds(c: Config): number {
   return s;
 }
 
-export function formatDuration(total: number): string {
-  const m = Math.floor(total / 60);
-  const s = total % 60;
-  return m ? `${m}m ${String(s).padStart(2, "0")}s` : `${s}s`;
-}
-
-export function shortHash(content: string): string {
-  let h = 5381;
-  for (let i = 0; i < content.length; i++) {
-    h = ((h << 5) + h + content.charCodeAt(i)) | 0;
-  }
-  return (h >>> 0).toString(16).padStart(8, "0");
-}
-
-export function byteSize(s: string): string {
-  const b = new TextEncoder().encode(s).length;
-  return b < 1024 ? `${b} B` : `${(b / 1024).toFixed(1)} kB`;
-}
+// formatDuration / shortHash / byteSize live in services/format and are
+// re-exported here so existing consumers keep working unchanged.
+export { byteSize, formatDuration, shortHash };
 
 // ── dry-run script (simulated terminal output) ──────────────────────────────
 
@@ -1145,11 +1398,13 @@ export function buildRunLines(c: Config, arts: Artifacts): RunLine[] {
     { t: `  9f2c41e8a5d2 ▸▸▸▸▸▸▸▸▸▸▸▸▸▸▸▸▸▸▸▸ 100% · ${c.base === "alpine-3.20" ? "96 MiB" : "412 MiB"}`, c: "dim" },
     { t: `✔ cached locally`, c: "ok" },
   ];
-  if (c.cloneRepo) {
-    lines.push({ t: `▸ cloning github.com/${c.owner}/${c.repo} (depth 1)`, c: "log" });
+  if (c.clone !== "off") {
+    lines.push({ t: `▸ cloning github.com/${c.owner}/${c.repo} (${cloneLabel[c.clone]})`, c: "log" });
     lines.push({ t: `✔ cloned → ./${c.repo}`, c: "ok" });
+    const tune = gitTuningCount(c);
+    if (tune) lines.push({ t: `✔ git tuning applied (${tune} settings)`, c: "ok" });
   } else {
-    lines.push({ t: `▲ cloning disabled — expecting an existing workspace at ./${c.repo}`, c: "warn" });
+    lines.push({ t: `▲ clone strategy off — expecting an existing workspace at ./${c.repo}`, c: "warn" });
   }
   lines.push(
     { t: `▸ writing .devcontainer/devcontainer.json`, c: "log" },
@@ -1320,7 +1575,7 @@ export function estimateLayers(c: Config): LayerInfo[] {
 export const totalLayerMb = (layers: LayerInfo[]) =>
   layers.reduce((a, l) => a + l.mb, 0);
 
-// ── session persistence ──────────────────────────────────────────────────────
+// ── session persistence (built on services/persistence) ─────────────────────
 
 const STORE_KEY = "dcforge.manifest.v1";
 const STORE_VERSION = 1;
@@ -1334,11 +1589,7 @@ export function saveConfig(c: Config) {
 }
 
 export function clearConfig() {
-  try {
-    localStorage.removeItem(STORE_KEY);
-  } catch {
-    /* ignore */
-  }
+  manifestStore.clear();
 }
 
 export function loadConfig(): { cfg: Config; restored: boolean } {

@@ -1,0 +1,55 @@
+{
+  "name": "GHCR Devcontainer Forge",
+  "short_name": "Devcontainer Forge",
+  "description": "Enterprise-grade devcontainer environment manager",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0a0e1a",
+  "theme_color": "#f97316",
+  "orientation": "portrait-primary",
+  "icons": [
+    {
+      "src": "/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ],
+  "categories": ["developer", "productivity", "utilities"],
+  "screenshots": [
+    {
+      "src": "/screenshot-wide.png",
+      "sizes": "1920x1080",
+      "type": "image/png",
+      "form_factor": "wide"
+    },
+    {
+      "src": "/screenshot-narrow.png",
+      "sizes": "1080x1920",
+      "type": "image/png",
+      "form_factor": "narrow"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "New Configuration",
+      "short_name": "New Config",
+      "description": "Start a new devcontainer configuration",
+      "url": "/?action=new",
+      "icons": [{ "src": "/icon-new.png", "sizes": "96x96" }]
+    },
+    {
+      "name": "Import Configuration",
+      "short_name": "Import",
+      "description": "Import an existing configuration",
+      "url": "/?action=import",
+      "icons": [{ "src": "/icon-import.png", "sizes": "96x96" }]
+    }
+  ]
+}
