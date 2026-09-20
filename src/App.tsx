@@ -405,7 +405,7 @@ export default function App() {
               <div className="font-display font-bold tracking-[0.04em] text-[15px] text-mist-100 whitespace-nowrap">
                 DEVCONTAINER <span className="text-ember-500">FORGE</span>
                 <span className="ml-2 text-[9px] font-mono font-normal text-mist-600 bg-ink-800 px-1.5 py-0.5 rounded border border-ink-700">
-                  v2.4.0
+                  v2.5.0
                 </span>
               </div>
               <div className="font-mono text-[10.5px] text-mist-600 truncate">
@@ -1231,7 +1231,7 @@ export default function App() {
         <div className="max-w-[1480px] mx-auto px-4 sm:px-6 py-3.5 flex flex-wrap items-center gap-x-6 gap-y-1.5 font-mono text-[11px] text-mist-600">
           <span className="flex items-center gap-2">
             <span className="led-live w-1.5 h-1.5 rounded-full bg-lagoon-400" />
-            forge v2.4.0 · spec devcontainers/v0.245.2 · visual builder + AI intelligence + pattern recognition + natural language
+            forge v2.5.0 · spec devcontainers/v0.245.2 · advanced analytics + trend analysis + AI insights + data persistence
           </span>
           <span className="hidden md:inline">manifest autosaves to this browser</span>
           <span className="sm:ml-auto">
