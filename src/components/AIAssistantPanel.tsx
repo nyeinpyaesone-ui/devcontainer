@@ -2,20 +2,45 @@ import { useState, useMemo } from "react";
 import type { Config } from "../lib/generator";
 import { AIAssistant, type AIInsight, type PatternMatch } from "../lib/ai-assistant";
 
+interface AnalyticsData {
+  featureUsage: { name: string; count: number }[];
+  toolchainUsage: { name: string; count: number }[];
+  policyCompliance: { name: string; enabled: boolean }[];
+  portDistribution: { port: string; service: string }[];
+  complexityScore: number;
+  recommendations: string[];
+}
+
 interface AIAssistantPanelProps {
   config: Config;
+  analytics?: AnalyticsData;
   isOpen: boolean;
   onClose: () => void;
 }
 
-export default function AIAssistantPanel({ config, isOpen, onClose }: AIAssistantPanelProps) {
+export default function AIAssistantPanel({ config, analytics, isOpen, onClose }: AIAssistantPanelProps) {
   const [activeTab, setActiveTab] = useState<"insights" | "patterns" | "suggestions">("insights");
   const [nlInput, setNlInput] = useState("");
 
   const assistant = useMemo(() => new AIAssistant(config), [config]);
   const insights = useMemo(() => assistant.generateInsights(), [assistant]);
   const patterns = useMemo(() => assistant.detectPatterns(), [assistant]);
-  const suggestions = useMemo(() => assistant.getSmartSuggestions(), [assistant]);
+  const suggestions = useMemo(() => {
+    const baseSuggestions = assistant.getSmartSuggestions();
+    // Enhance suggestions with analytics data
+    if (analytics) {
+      if (analytics.complexityScore > 70) {
+        baseSuggestions.push("Consider simplifying your configuration - complexity score is high");
+      }
+      if (analytics.policyCompliance.filter(p => p.enabled).length < 3) {
+        baseSuggestions.push("Enable more security policies for better compliance");
+      }
+      if (analytics.recommendations.length > 0) {
+        baseSuggestions.push(...analytics.recommendations);
+      }
+    }
+    return baseSuggestions;
+  }, [assistant, analytics]);
 
   const handleApplySuggestion = (insight: AIInsight) => {
     // In a real implementation, this would apply the suggestion to the config

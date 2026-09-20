@@ -73,6 +73,7 @@ import {
 import { useForgeBackend } from "./lib/useForgeBackend";
 import { useTheme } from "./hooks/useTheme";
 import { usePerformanceMetrics } from "./hooks/usePerformanceMetrics";
+import { useAnalytics } from "./hooks/useAnalytics";
 import { templates, type Template } from "./lib/templates";
 
 export default function App() {
@@ -119,6 +120,7 @@ export default function App() {
 
   const { theme, toggle: toggleTheme } = useTheme();
   const { metrics, recordGeneration } = usePerformanceMetrics();
+  const analytics = useAnalytics(cfg);
 
   const backend = useForgeBackend(cfg);
   const { bundle, status, ms, cacheHits, workerOk, times } = backend;
@@ -1191,6 +1193,53 @@ export default function App() {
             <PolicyMatrix policies={policies} />
           </Reveal>
 
+          <Reveal delay={140}>
+            <div className="border border-ink-700/80 rounded-xl bg-ink-900/70 px-4 py-3 transition-colors duration-300 hover:border-ink-600">
+              <div className="flex items-center justify-between mb-3">
+                <p className="font-mono text-[10.5px] uppercase tracking-[0.2em] text-mist-600">
+                  configuration analytics
+                </p>
+                <span className="font-mono text-[10px] text-mist-500">
+                  complexity: {analytics.complexityScore}/100
+                </span>
+              </div>
+              <div className="grid grid-cols-3 gap-3 text-center">
+                <div>
+                  <div className="font-display font-bold text-xl text-mist-100">
+                    {analytics.featureUsage.length}
+                  </div>
+                  <div className="font-mono text-[9px] text-mist-600 uppercase tracking-wider">
+                    features
+                  </div>
+                </div>
+                <div>
+                  <div className="font-display font-bold text-xl text-mist-100">
+                    {analytics.toolchainUsage.length}
+                  </div>
+                  <div className="font-mono text-[9px] text-mist-600 uppercase tracking-wider">
+                    toolchains
+                  </div>
+                </div>
+                <div>
+                  <div className="font-display font-bold text-xl text-mist-100">
+                    {analytics.policyCompliance.filter(p => p.enabled).length}/5
+                  </div>
+                  <div className="font-mono text-[9px] text-mist-600 uppercase tracking-wider">
+                    policies
+                  </div>
+                </div>
+              </div>
+              {analytics.recommendations.length > 0 && (
+                <div className="mt-3 pt-3 border-t border-ink-700/70">
+                  <p className="font-mono text-[10px] text-mist-500 mb-1">💡 recommendations</p>
+                  <p className="text-[11px] text-mist-400 leading-relaxed">
+                    {analytics.recommendations[0]}
+                  </p>
+                </div>
+              )}
+            </div>
+          </Reveal>
+
           <div id="artifacts" className="scroll-mt-24">
             <Reveal delay={160}>
               <CodePanel files={files} onToast={toast} active={tab} onTabChange={setTab} />
@@ -1310,7 +1359,7 @@ export default function App() {
       {githubTemplateOpen && <GitHubTemplateExport config={cfg} onClose={() => setGithubTemplateOpen(false)} />}
       {bashPlaygroundOpen && <BashPlayground onClose={() => setBashPlaygroundOpen(false)} />}
       {wizardOpen && <ConfigurationWizard onComplete={(newConfig) => { setCfg(newConfig); setWizardOpen(false); toast("Configuration applied from wizard"); }} onClose={() => setWizardOpen(false)} />}
-      <AIAssistantPanel config={cfg} isOpen={aiAssistantOpen} onClose={() => setAiAssistantOpen(false)} />
+      <AIAssistantPanel config={cfg} analytics={analytics} isOpen={aiAssistantOpen} onClose={() => setAiAssistantOpen(false)} />
       <VisualBuilder config={cfg} onConfigChange={setCfg} isOpen={visualBuilderOpen} onClose={() => setVisualBuilderOpen(false)} />
       <PerformanceProfiler config={cfg} isOpen={performanceProfilerOpen} onClose={() => setPerformanceProfilerOpen(false)} />
       <CollaborationPanel config={cfg} onConfigChange={setCfg} isOpen={collaborationOpen} onClose={() => setCollaborationOpen(false)} />
