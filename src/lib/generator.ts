@@ -1323,10 +1323,11 @@ export const totalLayerMb = (layers: LayerInfo[]) =>
 // ── session persistence ──────────────────────────────────────────────────────
 
 const STORE_KEY = "dcforge.manifest.v1";
+const STORE_VERSION = 1;
 
 export function saveConfig(c: Config) {
   try {
-    localStorage.setItem(STORE_KEY, JSON.stringify(c));
+    localStorage.setItem(STORE_KEY, JSON.stringify({ version: STORE_VERSION, config: c }));
   } catch {
     /* storage unavailable — ignore */
   }
@@ -1344,7 +1345,19 @@ export function loadConfig(): { cfg: Config; restored: boolean } {
   try {
     const raw = localStorage.getItem(STORE_KEY);
     if (!raw) return { cfg: DEFAULT_CONFIG, restored: false };
-    const p = JSON.parse(raw) as Partial<Config>;
+    const parsed = JSON.parse(raw);
+    
+    // Handle legacy format (pre-versioned) or current versioned format
+    const data = typeof parsed === 'object' && parsed.version !== undefined 
+      ? parsed 
+      : { version: 0, config: parsed };
+    
+    // Schema migration hook for future versions
+    if (data.version !== STORE_VERSION) {
+      console.warn(`[config] migrating from v${data.version} to v${STORE_VERSION}`);
+    }
+    
+    const p = data.config as Partial<Config>;
     if (!p || typeof p !== "object") return { cfg: DEFAULT_CONFIG, restored: false };
     const mergeList = <T extends { id: string }>(
       defs: T[],
@@ -1364,7 +1377,8 @@ export function loadConfig(): { cfg: Config; restored: boolean } {
       enforce: { ...DEFAULT_CONFIG.enforce, ...(p.enforce ?? {}) },
     };
     return { cfg, restored: true };
-  } catch {
+  } catch (err) {
+    console.error('[config] failed to load manifest:', err instanceof Error ? err.message : err);
     return { cfg: DEFAULT_CONFIG, restored: false };
   }
 }
