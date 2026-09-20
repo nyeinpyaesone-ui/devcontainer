@@ -67,8 +67,8 @@ export function useForgeBackend(cfg: Config): BackendState {
         }
         cacheRef.current.set(keyOf(lastCfgRef.current), res.bundle);
         setBundle(res.bundle);
-        setMs(res.ms);
-        recordTime(res.ms);
+        setMs(res.ms ?? 0);
+        recordTime(res.ms ?? 0);
         setStatus("ready");
       };
       workerRef.current = w;

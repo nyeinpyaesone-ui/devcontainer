@@ -1,9 +1,8 @@
-export interface Toast {
-  id: number;
-  msg: string;
-}
+import { useToasts } from "../services/toast";
 
-export default function Toasts({ toasts }: { toasts: Toast[] }) {
+/** toast host — renders whatever the toast service currently holds */
+export default function Toasts() {
+  const toasts = useToasts();
   return (
     <div className="fixed bottom-5 right-5 z-[60] flex flex-col gap-2 items-end pointer-events-none">
       {toasts.map((t) => (

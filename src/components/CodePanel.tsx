@@ -1,14 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { countLines, highlightLine, type Lang } from "../lib/highlight";
+import { highlightLine, type Lang } from "../lib/highlight";
 import { byteSize, shortHash } from "../lib/generator";
-import {
-  IconCheck,
-  IconCopy,
-  IconDownload,
-  Kbd,
-  copyText,
-  downloadFile,
-} from "./ui";
+import { countLines } from "../services/format";
+import { copyText } from "../services/clipboard";
+import { downloadFile } from "../services/downloads";
+import { IconCheck, IconCopy, IconDownload, Kbd } from "./ui";
 
 export interface FileTab {
   name: string;

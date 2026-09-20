@@ -1,28 +1,57 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import AIAssistantPanel from "./components/AIAssistantPanel";
+import AnalyticsDashboard from "./components/AnalyticsDashboard";
+import BackupRestoreSystem from "./components/BackupRestoreSystem";
+import BashPlayground from "./components/BashPlayground";
+import ChangelogModal from "./components/ChangelogModal";
 import CodePanel, { type FileTab } from "./components/CodePanel";
+import CommandPalette, { type PaletteGroup } from "./components/CommandPalette";
+import CompareMode from "./components/CompareMode";
+import ConfigLinter from "./components/ConfigLinter";
+import ConfigValidator from "./components/ConfigValidator";
+import ConfigurationWizard from "./components/ConfigurationWizard";
+import CostEstimation from "./components/CostEstimation";
+import CustomLintRules from "./components/CustomLintRules";
+import DependencyGraph from "./components/DependencyGraph";
 import DryRunModal from "./components/DryRunModal";
+import ExportFormatSelector from "./components/ExportFormatSelector";
+import GitHubTemplateExport from "./components/GitHubTemplateExport";
+import HistoryTracker from "./components/HistoryTracker";
 import LayerStack from "./components/LayerStack";
+import MultiEnvironmentSelector from "./components/MultiEnvironmentSelector";
+import OnboardingTour from "./components/OnboardingTour";
+import PerfDashboard from "./components/PerfDashboard";
+import { PerformanceProfiler } from "./components/PerformanceProfiler";
 import PolicyMatrix from "./components/PolicyMatrix";
-import Toasts, { type Toast } from "./components/Toasts";
+import { CollaborationPanel } from "./components/CollaborationPanel";
+import { VersionControlPanel } from "./components/VersionControlPanel";
+import { CompliancePanel } from "./components/CompliancePanel";
+import SecurityAuditModal from "./components/SecurityAuditModal";
+import ShortcutsModal from "./components/ShortcutsModal";
+import SprintFlowchart from "./components/SprintFlowchart";
+import TemplatePicker from "./components/TemplatePicker";
+import Toasts from "./components/Toasts";
+import VisualBuilder from "./components/VisualBuilder";
 import {
   ChipInput,
   CountUp,
+  Gauge,
   IconCopy,
   IconDownload,
   IconPlay,
   IconReset,
+  Kbd,
   LogoMark,
   Reveal,
   Section,
   Select,
   Sparkline,
   Switch,
-  Gauge,
-  Kbd,
   TextField,
-  copyText,
-  downloadFile,
 } from "./components/ui";
+import { copyText } from "./services/clipboard";
+import { downloadFile } from "./services/downloads";
+import { toast } from "./services/toast";
 import {
   activeFeatures,
   bootstrapLine,
@@ -34,123 +63,65 @@ import {
   hasViolation,
   imageRef,
   loadConfig,
+  policyMatrix,
   readiness,
   saveConfig,
   shortHash,
   type Config,
   type Enforcement,
 } from "./lib/generator";
-import CommandPalette, { type PaletteGroup, type PaletteItem } from "./components/CommandPalette";
-import { countLines } from "./lib/highlight";
 import { useForgeBackend } from "./lib/useForgeBackend";
-
-// ── typewriter ticker ────────────────────────────────────────────────────────
-
-function Ticker({ messages }: { messages: string[] }) {
-  const [mi, setMi] = useState(0);
-  const [chars, setChars] = useState(0);
-  const msg = messages[mi % messages.length];
-
-  useEffect(() => {
-    if (chars < msg.length) {
-      const t = window.setTimeout(() => setChars((c) => c + 2), 26);
-      return () => clearTimeout(t);
-    }
-    const t = window.setTimeout(() => {
-      setChars(0);
-      setMi((i) => (i + 1) % messages.length);
-    }, 2600);
-    return () => clearTimeout(t);
-  }, [chars, msg, messages.length]);
-
-  return (
-    <div className="hidden xl:flex items-center gap-2 min-w-0 font-mono text-[11.5px] text-mist-500 border border-ink-700/70 rounded-lg bg-ink-900/70 px-3 py-1.5 max-w-[430px]">
-      <span className="text-lagoon-400 shrink-0">▸</span>
-      <span className="truncate">
-        {msg.slice(0, chars)}
-        <span className="caret inline-block w-[6px] h-[12px] translate-y-[1px] bg-lagoon-400/80 ml-0.5" />
-      </span>
-    </div>
-  );
-}
-
-// ── simulated registry event feed ────────────────────────────────────────────
-
-function FeedLine({ img }: { img: string }) {
-  const events = useMemo(
-    () => [
-      `pull ${img} · 412 MB · 3.4s`,
-      `digest verified · sha256:9f2c41…e1aa`,
-      `attest sbom → spdx · ok`,
-      `push layer 7/7 · done`,
-      `cache hit · skipped pull`,
-    ],
-    [img]
-  );
-  const [i, setI] = useState(0);
-
-  useEffect(() => {
-    const t = window.setInterval(() => setI((x) => (x + 1) % events.length), 2800);
-    return () => clearInterval(t);
-  }, [events.length]);
-
-  return (
-    <span key={i} className="feed-in inline-flex items-center gap-2 min-w-0">
-      <span className="led-live w-1.5 h-1.5 rounded-full bg-lagoon-400 shrink-0" />
-      <span className="truncate">{events[i]}</span>
-    </span>
-  );
-}
-
-// ── bootstrap one-liner strip ────────────────────────────────────────────────
-
-function BootstrapStrip({ line, onToast }: { line: string; onToast: (m: string) => void }) {
-  const [copied, setCopied] = useState(false);
-  return (
-    <div className="flex items-center gap-3 rounded-xl border border-ink-700/80 bg-ink-900/70 px-3.5 py-2.5 transition-colors duration-200 hover:border-ember-500/40">
-      <span className="font-mono text-[13px] text-ember-400 shrink-0 select-none">$</span>
-      <code className="font-mono text-[12px] text-mist-300 truncate">{line}</code>
-      <button
-        type="button"
-        onClick={async () => {
-          if (await copyText(line)) {
-            setCopied(true);
-            onToast("bootstrap one-liner copied");
-            window.setTimeout(() => setCopied(false), 1600);
-          } else onToast("Clipboard unavailable in this browser");
-        }}
-        className="ml-auto shrink-0 flex items-center gap-1.5 rounded-md border border-ink-600 px-2.5 py-1.5 font-mono text-[11px] text-mist-300 transition-all hover:border-ember-500/50 hover:text-ember-300 active:scale-95"
-      >
-        {copied ? (
-          <svg viewBox="0 0 16 16" className="w-3 h-3 text-lagoon-400" fill="none" stroke="currentColor" strokeWidth="2">
-            <path d="M3 8.5 6.5 12 13 4.5" strokeLinecap="round" strokeLinejoin="round" />
-          </svg>
-        ) : (
-          <IconCopy className="w-3 h-3" />
-        )}
-        {copied ? "copied" : "copy"}
-      </button>
-    </div>
-  );
-}
-
-// ── app ──────────────────────────────────────────────────────────────────────
+import { useTheme } from "./hooks/useTheme";
+import { usePerformanceMetrics } from "./hooks/usePerformanceMetrics";
+import { useAnalytics } from "./hooks/useAnalytics";
+import { templates, type Template } from "./lib/templates";
 
 export default function App() {
   const [boot] = useState(loadConfig);
   const [cfg, setCfg] = useState<Config>(boot.cfg);
   const [tab, setTab] = useState(0);
-  const [toasts, setToasts] = useState<Toast[]>([]);
   const [showRun, setShowRun] = useState(false);
-  const [paletteOpen, setPaletteOpen] = useState(false);
   const [verified, setVerified] = useState(false);
   const [runFailed, setRunFailed] = useState(false);
   const [scriptCopied, setScriptCopied] = useState(false);
-  const toastId = useRef(0);
+  const [paletteOpen, setPaletteOpen] = useState(false);
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  const [onboardingOpen, setOnboardingOpen] = useState(false);
+  const [templatePickerOpen, setTemplatePickerOpen] = useState(false);
+  const [changelogOpen, setChangelogOpen] = useState(false);
+  const [perfDashboardOpen, setPerfDashboardOpen] = useState(false);
+  const [compareOpen, setCompareOpen] = useState(false);
+  const [securityAuditOpen, setSecurityAuditOpen] = useState(false);
+  const [githubTemplateOpen, setGithubTemplateOpen] = useState(false);
+  const [bashPlaygroundOpen, setBashPlaygroundOpen] = useState(false);
+  const [wizardOpen, setWizardOpen] = useState(false);
+  const [aiAssistantOpen, setAiAssistantOpen] = useState(false);
+  const [visualBuilderOpen, setVisualBuilderOpen] = useState(false);
+  const [performanceProfilerOpen, setPerformanceProfilerOpen] = useState(false);
+  const [collaborationOpen, setCollaborationOpen] = useState(false);
+  const [versionControlOpen, setVersionControlOpen] = useState(false);
+  const [complianceOpen, setComplianceOpen] = useState(false);
   const announcedRestore = useRef(false);
+  const announcedOnboarding = useRef(false);
 
-  // Heavy generation runs in the forge worker (a background "backend");
-  // the main thread only renders the resulting bundle.
+  // Register service worker for PWA support
+  useEffect(() => {
+    if ("serviceWorker" in navigator) {
+      navigator.serviceWorker
+        .register("/sw.js")
+        .then((registration) => {
+          console.log("SW registered:", registration);
+        })
+        .catch((error) => {
+          console.log("SW registration failed:", error);
+        });
+    }
+  }, []);
+
+  const { theme, toggle: toggleTheme } = useTheme();
+  const { metrics, recordGeneration } = usePerformanceMetrics();
+  const analytics = useAnalytics(cfg);
+
   const backend = useForgeBackend(cfg);
   const { bundle, status, ms, cacheHits, workerOk, times } = backend;
   const arts = bundle.arts;
@@ -159,22 +130,40 @@ export default function App() {
   const feats = activeFeatures(cfg);
   const est = bundle.estSeconds;
 
-  const toast = (msg: string) => {
-    const id = ++toastId.current;
-    setToasts((t) => [...t.slice(-2), { id, msg }]);
-    window.setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 2800);
-  };
-
-  // announce a restored session once
   useEffect(() => {
     if (boot.restored && !announcedRestore.current) {
       announcedRestore.current = true;
       toast("manifest restored from last session");
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // autosave the manifest
+  // Auto-show onboarding for first-time users
+  useEffect(() => {
+    if (!boot.restored && !announcedOnboarding.current) {
+      announcedOnboarding.current = true;
+      const hasSeenTour = localStorage.getItem("forge.onboarding.seen");
+      if (!hasSeenTour) {
+        setTimeout(() => setOnboardingOpen(true), 800);
+      }
+    }
+  }, []);
+
+  // Record performance metrics on generation
+  useEffect(() => {
+    if (ms > 0) {
+      const bytesGenerated = arts.setup.length + arts.json.length + arts.dockerfile.length + arts.workflow.length + arts.quickstart.length;
+      const cacheHit = cacheHits > 0;
+      recordGeneration(ms, bytesGenerated, cacheHit);
+    }
+  }, [ms, arts, cacheHits, recordGeneration]);
+
+  // Mark onboarding as seen when closed
+  useEffect(() => {
+    if (!onboardingOpen && announcedOnboarding.current) {
+      localStorage.setItem("forge.onboarding.seen", "true");
+    }
+  }, [onboardingOpen]);
+
   useEffect(() => {
     saveConfig(cfg);
   }, [cfg]);
@@ -209,9 +198,74 @@ export default function App() {
     setRunFailed(false);
   };
 
+  // ── export/import manifest ─────────────────────────────────────────────
+  const exportManifest = () => {
+    const json = JSON.stringify(cfg, null, 2);
+    const blob = new Blob([json], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${cfg.owner}-${cfg.repo}-manifest.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 800);
+    toast("manifest exported");
+  };
+
+  const importManifest = () => {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = "application/json";
+    input.onchange = (e) => {
+      const file = (e.target as HTMLInputElement).files?.[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = (ev) => {
+        try {
+          const imported = JSON.parse(ev.target?.result as string) as Config;
+          setCfg(imported);
+          saveConfig(imported);
+          setVerified(false);
+          setRunFailed(false);
+          toast("manifest imported");
+        } catch {
+          toast("invalid manifest file");
+        }
+      };
+      reader.readAsText(file);
+    };
+    input.click();
+  };
+
+  // ── share URL ──────────────────────────────────────────────────────────
+  const shareURL = () => {
+    const encoded = btoa(JSON.stringify(cfg));
+    const url = `${window.location.origin}${window.location.pathname}#config=${encoded}`;
+    navigator.clipboard.writeText(url);
+    toast("share URL copied to clipboard");
+  };
+
+  // load from URL hash on mount
+  useEffect(() => {
+    const hash = window.location.hash;
+    if (hash.startsWith("#config=")) {
+      try {
+        const encoded = hash.slice(8);
+        const decoded = JSON.parse(atob(encoded)) as Config;
+        setCfg(decoded);
+        saveConfig(decoded);
+        toast("manifest loaded from share URL");
+      } catch {
+        toast("invalid share URL");
+      }
+    }
+  }, []);
+
   const essCount = bundle.essentialCount;
   const policies = bundle.policies;
   const enforcedCount = bundle.enforcedCount;
+  const ready = readiness(cfg);
 
   const files: FileTab[] = [
     { name: "setup-env.sh", lang: "bash", badge: "sh", content: arts.setup },
@@ -219,6 +273,11 @@ export default function App() {
     { name: "Dockerfile", lang: "dockerfile", badge: "docker", content: arts.dockerfile },
     { name: "validate-devcontainer.yml", lang: "yaml", badge: "ci", content: arts.workflow },
     { name: "quickstart.sh", lang: "bash", badge: "sh", content: arts.quickstart },
+    { name: "docker-compose.yml", lang: "yaml", badge: "compose", content: arts.compose },
+    { name: "README.md", lang: "markdown", badge: "docs", content: arts.readme },
+    { name: ".env.example", lang: "bash", badge: "env", content: arts.envExample },
+    { name: "Makefile", lang: "makefile", badge: "make", content: arts.makefile },
+    { name: "ci-matrix.yml", lang: "yaml", badge: "matrix", content: arts.actionsMatrix },
   ];
 
   const copyScript = async () => {
@@ -238,9 +297,25 @@ export default function App() {
     toast("5 artifacts downloaded");
   };
 
-  // keyboard shortcuts — ref pattern keeps closures fresh
+  const applyTemplate = (template: Template) => {
+    setCfg((c) => ({ ...c, ...template.config }));
+    saveConfig({ ...cfg, ...template.config });
+    toast(`template "${template.name}" applied`);
+  };
+
   const keyHandler = useRef<(e: KeyboardEvent) => void>(() => {});
   keyHandler.current = (e) => {
+    // "?" opens shortcuts help (no modifier needed)
+    if (e.key === "?" && !e.metaKey && !e.ctrlKey && !e.altKey) {
+      const target = e.target as HTMLElement;
+      const isInput = target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable;
+      if (!isInput) {
+        e.preventDefault();
+        setShortcutsOpen(true);
+        return;
+      }
+    }
+
     const mod = e.metaKey || e.ctrlKey;
     if (!mod) return;
     if (e.key.toLowerCase() === "k") {
@@ -265,58 +340,16 @@ export default function App() {
     return () => window.removeEventListener("keydown", h);
   }, []);
 
-  const tickerMsgs = useMemo(
-    () => [
-      `resolved ${img} → sha256:${shortHash(arts.setup)}…`,
-      feats.length
-        ? `features: ${feats.map((f) => f.ref.split("/").pop() + (f.version ? "@" + f.version : "")).join(" · ")}`
-        : "features: none selected",
-      `forwarding :${cfg.ports.join(" :")} → localhost`,
-      essCount
-        ? `pre-install: ${essCount} essential pkgs → image layer`
-        : "pre-install: none — image ships bare",
-      bundle.langCount
-        ? `toolchains: ${cfg.langs
-            .filter((l) => l.on)
-            .map((l) => `${l.label.toLowerCase()} ${l.version}`)
-            .join(" · ")}`
-        : "toolchains: none pinned",
-      hasViolation(cfg)
-        ? "⚠ policy P1: remoteUser=root — build will be refused"
-        : `policy: ${enforcedCount}/5 gates enforced · CI gate armed`,
-      "spec devcontainers/v0.245.2 · schema valid",
-    ],
-    [img, arts.setup, feats, cfg.ports, cfg, enforcedCount, essCount]
-  );
-
-  // ── command palette ────────────────────────────────────────────────────────
   const goTo = (id: string) =>
     document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" });
 
-  const ready = readiness(cfg);
-
   const commands = useMemo<PaletteGroup[]>(() => {
-    const jump = (label: string, id: string, kw: string): PaletteItem => ({
+    const jump = (label: string, id: string, kw: string) => ({
       id: `go-${id}`,
       label: `jump to ${label}`,
       keywords: kw,
       run: () => goTo(id),
     });
-    const policyToggles: PaletteItem[] = (
-      [
-        { key: "nonRoot", label: "P1 · non-root execution" },
-        { key: "engines", label: "P2 · runtime pinning" },
-        { key: "secretsGuard", label: "P3 · secret hygiene" },
-        { key: "preCommit", label: "P4 · pre-commit guard" },
-        { key: "schemaGate", label: "P5 · schema gate" },
-      ] as { key: keyof Enforcement; label: string }[]
-    ).map((p) => ({
-      id: `tg-${p.key}`,
-      label: `${cfg.enforce[p.key] ? "disable" : "enable"} ${p.label}`,
-      hint: cfg.enforce[p.key] ? "on" : "off",
-      keywords: "policy gate enforce",
-      run: () => patchEnforce(p.key, !cfg.enforce[p.key]),
-    }));
     return [
       {
         title: "artifacts",
@@ -337,17 +370,7 @@ export default function App() {
         items: [
           { id: "act-dry", label: "simulate dry-run", kbd: "⌘+⏎", keywords: "verify terminal run test", run: () => setShowRun(true) },
           { id: "act-copy", label: "copy setup-env.sh", keywords: "clipboard script bash", run: () => void copyScript() },
-          { id: "act-dl", label: "download all artifacts", kbd: "⌘+S", keywords: "save export ship zip", run: downloadAll },
-          {
-            id: "act-boot",
-            label: "copy bootstrap one-liner",
-            keywords: "curl install remote pipe bash",
-            run: () => {
-              void copyText(bootstrapLine(cfg)).then((ok) =>
-                toast(ok ? "bootstrap one-liner copied" : "Clipboard unavailable in this browser")
-              );
-            },
-          },
+          { id: "act-dl", label: "download all artifacts", kbd: "⌘+S", keywords: "save export ship", run: downloadAll },
           {
             id: "act-reset",
             label: "reset manifest to defaults",
@@ -377,64 +400,13 @@ export default function App() {
           jump("ship readiness", "sec-summary", "score gauge verdict"),
         ],
       },
-      {
-        title: "toggles",
-        items: [
-          {
-            id: "tg-clone",
-            label: cfg.cloneRepo ? "disable repo cloning" : "enable repo cloning",
-            hint: cfg.cloneRepo ? "on" : "off",
-            keywords: "git clone workspace shallow",
-            run: () => patch({ cloneRepo: !cfg.cloneRepo }),
-          },
-          {
-            id: "tg-smoke",
-            label: cfg.smokeTest ? "disable smoke test" : "enable smoke test",
-            hint: cfg.smokeTest ? "on" : "off",
-            keywords: "docker run verify image",
-            run: () => patch({ smokeTest: !cfg.smokeTest }),
-          },
-          ...policyToggles,
-        ],
-      },
     ];
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [files, cfg]);
 
   return (
     <div className="min-h-screen flex flex-col">
-      {/* ── layered ambient background ─────────────────────────────────── */}
-      <div className="bg-forge" aria-hidden>
-        <div
-          className="absolute bottom-[-180px] left-[-160px] w-[560px] h-[560px] rounded-full"
-          style={{ background: "radial-gradient(circle, rgba(43,184,166,0.085), transparent 65%)" }}
-        />
-        <svg
-          className="float-slow absolute right-[6%] bottom-[16%] w-44 opacity-[0.055]"
-          viewBox="0 0 120 120"
-          fill="none"
-          stroke="#82b6ff"
-          strokeWidth="1.5"
-        >
-          <path d="M60 10 106 33 60 56 14 33Z" strokeLinejoin="round" />
-          <path d="M14 56l46 23 46-23" strokeLinejoin="round" />
-          <path d="M14 80l46 23 46-23" strokeLinejoin="round" />
-        </svg>
-        <svg
-          className="float-slow absolute left-[4%] top-[22%] w-24 opacity-[0.04]"
-          style={{ animationDelay: "-4s", animationDuration: "13s" }}
-          viewBox="0 0 120 120"
-          fill="none"
-          stroke="#f5a83c"
-          strokeWidth="2"
-        >
-          <path d="M60 10 106 33 60 56 14 33Z" strokeLinejoin="round" />
-          <path d="M14 56l46 23 46-23" strokeLinejoin="round" />
-          <path d="M14 80l46 23 46-23" strokeLinejoin="round" />
-        </svg>
-      </div>
+      <div className="bg-forge" aria-hidden />
 
-      {/* ── header ─────────────────────────────────────────────────────── */}
       <header className="sticky top-0 z-40 border-b border-ink-700/70 bg-ink-950/85 backdrop-blur-md">
         <div className="max-w-[1480px] mx-auto px-4 sm:px-6 h-[60px] flex items-center gap-4">
           <div className="flex items-center gap-3 min-w-0">
@@ -442,6 +414,9 @@ export default function App() {
             <div className="leading-tight min-w-0">
               <div className="font-display font-bold tracking-[0.04em] text-[15px] text-mist-100 whitespace-nowrap">
                 DEVCONTAINER <span className="text-ember-500">FORGE</span>
+                <span className="ml-2 text-[9px] font-mono font-normal text-mist-600 bg-ink-800 px-1.5 py-0.5 rounded border border-ink-700">
+                  v2.9.0
+                </span>
               </div>
               <div className="font-mono text-[10.5px] text-mist-600 truncate">
                 ghcr env setup · {cfg.owner}/{cfg.repo}
@@ -449,7 +424,230 @@ export default function App() {
             </div>
           </div>
 
-          <Ticker messages={tickerMsgs} />
+          {/* Utility buttons */}
+          <div className="hidden lg:flex items-center gap-1.5">
+            <button
+              type="button"
+              onClick={exportManifest}
+              title="Export manifest as JSON"
+              className="grid place-items-center w-8 h-8 rounded-lg border border-ink-700 bg-ink-900/60 text-mist-500 transition-all hover:border-skyx-400/50 hover:text-skyx-400 active:scale-95"
+            >
+              <svg viewBox="0 0 16 16" className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="1.5">
+                <path d="M8 2v8m0 0 3-3M8 10 5 7M3 13.5h10" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            </button>
+            <button
+              type="button"
+              onClick={importManifest}
+              title="Import manifest from JSON"
+              className="grid place-items-center w-8 h-8 rounded-lg border border-ink-700 bg-ink-900/60 text-mist-500 transition-all hover:border-lagoon-500/50 hover:text-lagoon-400 active:scale-95"
+            >
+              <svg viewBox="0 0 16 16" className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="1.5">
+                <path d="M8 10V2m0 0 3 3M8 2 5 5M3 13.5h10" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            </button>
+            <button
+              type="button"
+              onClick={shareURL}
+              title="Copy shareable URL"
+              className="grid place-items-center w-8 h-8 rounded-lg border border-ink-700 bg-ink-900/60 text-mist-500 transition-all hover:border-ember-500/50 hover:text-ember-400 active:scale-95"
+            >
+              <svg viewBox="0 0 16 16" className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="1.5">
+                <path d="M6.5 9.5 9.5 6.5M6 11.5a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.5M10 4.5a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.5" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            </button>
+            <button
+              type="button"
+              onClick={() => setShortcutsOpen(true)}
+              title="Keyboard shortcuts"
+              className="grid place-items-center w-8 h-8 rounded-lg border border-ink-700 bg-ink-900/60 text-mist-500 transition-all hover:border-mist-500/50 hover:text-mist-300 active:scale-95"
+            >
+              <Kbd>?</Kbd>
+            </button>
+            <button
+              type="button"
+              onClick={() => setTemplatePickerOpen(true)}
+              title="Start from template"
+              className="grid place-items-center w-8 h-8 rounded-lg border border-ink-700 bg-ink-900/60 text-mist-500 transition-all hover:border-coral-500/50 hover:text-coral-400 active:scale-95"
+            >
+              <svg viewBox="0 0 16 16" className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="1.5">
+                <rect x="2" y="2" width="5" height="5" rx="0.5" />
+                <rect x="9" y="2" width="5" height="5" rx="0.5" />
+                <rect x="2" y="9" width="5" height="5" rx="0.5" />
+                <rect x="9" y="9" width="5" height="5" rx="0.5" />
+              </svg>
+            </button>
+            <button
+              type="button"
+              onClick={() => setChangelogOpen(true)}
+              title="Changelog"
+              className="grid place-items-center w-8 h-8 rounded-lg border border-ink-700 bg-ink-900/60 text-mist-500 transition-all hover:border-lagoon-500/50 hover:text-lagoon-400 active:scale-95"
+            >
+              <svg viewBox="0 0 16 16" className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="1.5">
+                <path d="M8 2v12M4 6l4-4 4 4M4 10l4 4 4-4" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            </button>
+            <button
+              type="button"
+              onClick={() => setPerfDashboardOpen(true)}
+              title="Performance analytics"
+              className="grid place-items-center w-8 h-8 rounded-lg border border-ink-700 bg-ink-900/60 text-mist-500 transition-all hover:border-skyx-400/50 hover:text-skyx-400 active:scale-95"
+            >
+              <svg viewBox="0 0 16 16" className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="1.5">
+                <path d="M2 12L6 8l3 3 5-7" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            </button>
+            <button
+              type="button"
+              onClick={() => setOnboardingOpen(true)}
+              title="Interactive tour"
+              className="grid place-items-center w-8 h-8 rounded-lg border border-ink-700 bg-ink-900/60 text-mist-500 transition-all hover:border-ember-500/50 hover:text-ember-400 active:scale-95"
+            >
+              <svg viewBox="0 0 16 16" className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="1.5">
+                <circle cx="8" cy="8" r="6" />
+                <path d="M8 5v3l2 2" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            </button>
+            <button
+              type="button"
+              onClick={toggleTheme}
+              title={`Switch to ${theme === "dark" ? "light" : "dark"} mode`}
+              className="grid place-items-center w-8 h-8 rounded-lg border border-ink-700 bg-ink-900/60 text-mist-500 transition-all hover:border-mist-500/50 hover:text-mist-300 active:scale-95"
+            >
+              {theme === "dark" ? (
+                <svg viewBox="0 0 16 16" className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="1.5">
+                  <circle cx="8" cy="8" r="4" />
+                  <path d="M8 1v2M8 13v2M1 8h2M13 8h2M3.5 3.5l1.5 1.5M11 11l1.5 1.5M3.5 12.5l1.5-1.5M11 5l1.5-1.5" strokeLinecap="round" />
+                </svg>
+              ) : (
+                <svg viewBox="0 0 16 16" className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="1.5">
+                  <path d="M14 9.5A6.5 6.5 0 0 1 6.5 2 5.5 5.5 0 1 0 14 9.5z" />
+                </svg>
+              )}
+            </button>
+            <button
+              type="button"
+              onClick={() => setSecurityAuditOpen(true)}
+              title="Security audit"
+              className="grid place-items-center w-8 h-8 rounded-lg border border-ink-700 bg-ink-900/60 text-mist-500 transition-all hover:border-red-500/50 hover:text-red-400 active:scale-95"
+            >
+              <svg viewBox="0 0 16 16" className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="1.5">
+                <path d="M8 1L2 4v4c0 3.5 2.5 6.5 6 7.5 3.5-1 6-4 6-7.5V4L8 1z" strokeLinejoin="round" />
+                <path d="M6 8l2 2 4-4" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            </button>
+            <button
+              type="button"
+              onClick={() => setAiAssistantOpen(true)}
+              title="AI Configuration Assistant"
+              className="grid place-items-center w-8 h-8 rounded-lg border border-ink-700 bg-ink-900/60 text-mist-500 transition-all hover:border-purple-500/50 hover:text-purple-400 active:scale-95"
+            >
+              <svg viewBox="0 0 16 16" className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="1.5">
+                <circle cx="8" cy="8" r="6" />
+                <circle cx="6" cy="7" r="1" fill="currentColor" />
+                <circle cx="10" cy="7" r="1" fill="currentColor" />
+                <path d="M6 10c0.5 0.5 1 0.75 2 0.75s1.5-0.25 2-0.75" strokeLinecap="round" />
+              </svg>
+            </button>
+            <button
+              type="button"
+              onClick={() => setVisualBuilderOpen(true)}
+              title="Visual Configuration Builder"
+              className="grid place-items-center w-8 h-8 rounded-lg border border-ink-700 bg-ink-900/60 text-mist-500 transition-all hover:border-blue-500/50 hover:text-blue-400 active:scale-95"
+            >
+              <svg viewBox="0 0 16 16" className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="1.5">
+                <rect x="2" y="2" width="5" height="5" rx="0.5" />
+                <rect x="9" y="2" width="5" height="5" rx="0.5" />
+                <rect x="2" y="9" width="5" height="5" rx="0.5" />
+                <rect x="9" y="9" width="5" height="5" rx="0.5" />
+              </svg>
+            </button>
+            <button
+              type="button"
+              onClick={() => setPerformanceProfilerOpen(true)}
+              title="Performance Profiler"
+              className="grid place-items-center w-8 h-8 rounded-lg border border-ink-700 bg-ink-900/60 text-mist-500 transition-all hover:border-purple-500/50 hover:text-purple-400 active:scale-95"
+            >
+              <svg viewBox="0 0 16 16" className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="1.5">
+                <path d="M2 12L6 8l3 3 5-7" strokeLinecap="round" strokeLinejoin="round" />
+                <circle cx="2" cy="12" r="1" fill="currentColor" />
+                <circle cx="6" cy="8" r="1" fill="currentColor" />
+                <circle cx="9" cy="11" r="1" fill="currentColor" />
+                <circle cx="14" cy="4" r="1" fill="currentColor" />
+              </svg>
+            </button>
+            <button
+              type="button"
+              onClick={() => setCollaborationOpen(true)}
+              title="Real-time Collaboration"
+              className="grid place-items-center w-8 h-8 rounded-lg border border-ink-700 bg-ink-900/60 text-mist-500 transition-all hover:border-indigo-500/50 hover:text-indigo-400 active:scale-95"
+            >
+              <svg viewBox="0 0 16 16" className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="1.5">
+                <circle cx="5" cy="6" r="2" />
+                <circle cx="11" cy="6" r="2" />
+                <path d="M2 13c0-2 1.5-3 3-3s3 1 3 3M8 13c0-2 1.5-3 3-3s3 1 3 3" strokeLinecap="round" />
+              </svg>
+            </button>
+            <button
+              type="button"
+              onClick={() => setComplianceOpen(true)}
+              title="Compliance & Audit"
+              className="grid place-items-center w-8 h-8 rounded-lg border border-ink-700 bg-ink-900/60 text-mist-500 transition-all hover:border-amber-500/50 hover:text-amber-400 active:scale-95"
+            >
+              <svg viewBox="0 0 16 16" className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="1.5">
+                <path d="M4 2h8a1 1 0 011 1v10a1 1 0 01-1 1H4a1 1 0 01-1-1V3a1 1 0 011-1z" strokeLinejoin="round" />
+                <path d="M6 5h4M6 8h4M6 11h2" strokeLinecap="round" />
+              </svg>
+            </button>
+            <button
+              type="button"
+              onClick={() => setGithubTemplateOpen(true)}
+              title="Export GitHub template"
+              className="grid place-items-center w-8 h-8 rounded-lg border border-ink-700 bg-ink-900/60 text-mist-500 transition-all hover:border-green-500/50 hover:text-green-400 active:scale-95"
+            >
+              <svg viewBox="0 0 16 16" className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="1.5">
+                <path d="M6 3h4l3 3v7a1 1 0 01-1 1H4a1 1 0 01-1-1V4a1 1 0 011-1h2z" strokeLinejoin="round" />
+                <path d="M10 3v3h3M8 9v3M6.5 10.5h3" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            </button>
+            <button
+              type="button"
+              onClick={() => setBashPlaygroundOpen(true)}
+              title="Interactive Bash Playground"
+              className="grid place-items-center w-8 h-8 rounded-lg border border-ink-700 bg-ink-900/60 text-mist-500 transition-all hover:border-lagoon-500/50 hover:text-lagoon-400 active:scale-95"
+            >
+              <svg viewBox="0 0 16 16" className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="1.5">
+                <path d="M3 4l3 3-3 3M8 10h5" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            </button>
+            <button
+              type="button"
+              onClick={() => setWizardOpen(true)}
+              title="Configuration Wizard"
+              className="grid place-items-center w-8 h-8 rounded-lg border border-ink-700 bg-ink-900/60 text-mist-500 transition-all hover:border-purple-500/50 hover:text-purple-400 active:scale-95"
+            >
+              <svg viewBox="0 0 16 16" className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="1.5">
+                <path d="M8 1v14M1 8h14M3 3l10 10M13 3L3 13" strokeLinecap="round" />
+              </svg>
+            </button>
+            <button
+              type="button"
+              onClick={() => setCompareOpen(true)}
+              title="Compare configurations"
+              className="grid place-items-center w-8 h-8 rounded-lg border border-ink-700 bg-ink-900/60 text-mist-500 transition-all hover:border-skyx-400/50 hover:text-skyx-400 active:scale-95"
+            >
+              <svg viewBox="0 0 16 16" className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="1.5">
+                <path d="M2 4h12M2 8h8M2 12h10" strokeLinecap="round" />
+              </svg>
+            </button>
+            <HistoryTracker
+              currentConfig={cfg}
+              onRestore={(restoredConfig) => {
+                setCfg(restoredConfig);
+                toast("Configuration restored from history");
+              }}
+            />
+          </div>
 
           <div className="ml-auto flex items-center gap-2.5">
             <button
@@ -484,14 +682,8 @@ export default function App() {
               />
               {verified ? "dry-run passed" : runFailed ? "dry-run failed" : "unverified"}
             </span>
-
-            {/* backend telemetry — generation runs in a worker off the main thread */}
             <span
-              title={
-                workerOk
-                  ? "forge worker backend — artifacts computed off the main thread"
-                  : "worker unavailable — computing on the main thread"
-              }
+              title={workerOk ? "forge worker backend" : "worker unavailable"}
               className={`hidden md:flex items-center gap-2 font-mono text-[10.5px] px-2.5 py-1.5 rounded-lg border transition-colors ${
                 status === "compiling"
                   ? "border-skyx-400/45 text-skyx-300 bg-skyx-400/[0.07]"
@@ -513,7 +705,6 @@ export default function App() {
               </span>
               <Sparkline values={times} className="w-14 h-4 text-lagoon-400" />
             </span>
-
             <button
               type="button"
               onClick={() => setShowRun(true)}
@@ -548,9 +739,7 @@ export default function App() {
         </div>
       </header>
 
-      {/* ── workspace ──────────────────────────────────────────────────── */}
       <main className="flex-1 w-full max-w-[1480px] mx-auto px-4 sm:px-6 py-6 grid gap-6 lg:grid-cols-[396px_1fr] items-start">
-        {/* left · configuration */}
         <div className="space-y-4">
           <Reveal>
             <div className="flex items-center justify-between">
@@ -563,6 +752,7 @@ export default function App() {
                   clearConfig();
                   setCfg(DEFAULT_CONFIG);
                   setVerified(false);
+                  setRunFailed(false);
                   toast("config reset to forge defaults");
                 }}
                 className="flex items-center gap-1.5 font-mono text-[11px] text-mist-600 hover:text-ember-400 transition-colors"
@@ -629,34 +819,18 @@ export default function App() {
                   />
                 </div>
               </div>
-              <div>
-                <span className="block text-[10.5px] uppercase tracking-[0.14em] text-mist-600 font-mono mb-1.5">
-                  remote user
-                </span>
-                <Select
-                  ariaLabel="remote user"
-                  value={cfg.remoteUser}
-                  onChange={(v) => patch({ remoteUser: v })}
-                  options={[
-                    { value: "vscode", label: "vscode (non-root)" },
-                    { value: "node", label: "node" },
-                    { value: "root", label: "root (not recommended)" },
-                  ]}
-                />
-              </div>
               {hasViolation(cfg) && (
                 <div className="rounded-lg border border-coral-500/45 bg-coral-500/[0.07] px-3 py-2.5 text-[12px] text-coral-400 leading-relaxed">
                   <span className="font-mono text-[9.5px] uppercase tracking-[0.16em] mr-2 align-middle border border-coral-500/40 rounded px-1.5 py-0.5">
                     P1 violation
                   </span>
                   remoteUser=root — the generated script will{" "}
-                  <span className="font-semibold">exit 1</span> and the CI gate will fail until you
-                  switch to a non-root user.
+                  <span className="font-semibold">exit 1</span> and the CI gate will fail.
                 </div>
               )}
               <Switch
-                on={cfg.cloneRepo}
-                onChange={(v) => patch({ cloneRepo: v })}
+                on={cfg.clone !== "off"}
+                onChange={(v) => patch({ clone: v ? "shallow" : "off" })}
                 label="git clone the repo during setup"
                 desc={`Shallow clone into ./${cfg.repo} — off means an existing workspace is required`}
               />
@@ -710,10 +884,6 @@ export default function App() {
                   />
                 ))}
               </div>
-              <p className="font-mono text-[10.5px] text-mist-600 leading-relaxed">
-                resolved from <span className="text-skyx-400">ghcr.io/devcontainers/features</span> —
-                installed by the CLI on first <span className="text-mist-300">devcontainer up</span>
-              </p>
             </Section>
           </Reveal>
 
@@ -746,26 +916,18 @@ export default function App() {
                   />
                 ))}
               </div>
-              {essCount > 0 ? (
+              {essCount > 0 && (
                 <div className="flex flex-wrap gap-1.5 rounded-lg border border-ink-700/70 bg-ink-950/50 px-3 py-2.5">
                   {essentialPkgs(cfg).map((p) => (
                     <code
                       key={p}
-                      className="chip-in font-mono text-[10.5px] text-mist-300 bg-ink-800/80 border border-ink-700/80 rounded px-1.5 py-0.5 transition-colors hover:border-lagoon-500/50 hover:text-lagoon-300"
+                      className="chip-in font-mono text-[10.5px] text-mist-300 bg-ink-800/80 border border-ink-700/80 rounded px-1.5 py-0.5"
                     >
                       {p}
                     </code>
                   ))}
                 </div>
-              ) : (
-                <p className="font-mono text-[10.5px] text-coral-400/90">
-                  ▲ no tool groups enabled — the workspace image ships bare
-                </p>
               )}
-              <p className="font-mono text-[10.5px] text-mist-600 leading-relaxed">
-                baked into <span className="text-mist-300">.devcontainer/Dockerfile</span> — installed
-                once at build time, <span className="text-mist-300">0s</span> on every reopen
-              </p>
             </Section>
           </Reveal>
 
@@ -799,29 +961,6 @@ export default function App() {
                   />
                 ))}
               </div>
-              {bundle.langCount > 0 ? (
-                <div className="flex flex-wrap gap-1.5 rounded-lg border border-ink-700/70 bg-ink-950/50 px-3 py-2.5">
-                  {cfg.langs
-                    .filter((l) => l.on)
-                    .map((l) => (
-                      <code
-                        key={l.id}
-                        className="font-mono text-[10.5px] text-coral-300 bg-ink-800/80 border border-coral-500/25 rounded px-1.5 py-0.5 transition-colors hover:border-coral-500/60"
-                      >
-                        {l.label.toLowerCase()} {l.version}
-                      </code>
-                    ))}
-                </div>
-              ) : (
-                <p className="font-mono text-[10.5px] text-mist-600">
-                  nothing pinned — the node feature remains the only runtime
-                </p>
-              )}
-              <p className="font-mono text-[10.5px] text-mist-600 leading-relaxed">
-                each chain auto-provisions at build time via{" "}
-                <span className="text-mist-300">rustup · tarball · pyenv · apt</span> — verified by{" "}
-                <span className="text-mist-300">quickstart.sh</span> on every start
-              </p>
             </Section>
           </Reveal>
 
@@ -850,12 +989,6 @@ export default function App() {
                 onChange={(v) => patch({ extensions: v })}
                 placeholder="publisher.extension (enter to add)"
               />
-              <TextField
-                label="extra apt packages (→ Dockerfile)"
-                value={cfg.aptExtra}
-                onChange={(v) => patch({ aptExtra: v })}
-                placeholder="curl, jq, …"
-              />
               <span className="block text-[10.5px] uppercase tracking-[0.14em] text-mist-600 font-mono mb-1.5 pt-1">
                 post-create pipeline
               </span>
@@ -881,31 +1014,11 @@ export default function App() {
             <Section index="08" title="Enforcement" hint={`${enforcedCount}/5 gates`} anchor="sec-enforce">
               {(
                 [
-                  {
-                    key: "nonRoot",
-                    label: "P1 · non-root execution",
-                    desc: "Refuse remoteUser=root — script exits 1, CI gate fails",
-                  },
-                  {
-                    key: "engines",
-                    label: "P2 · runtime pinning",
-                    desc: "Write .nvmrc on setup — honored by nvm, fnm, volta",
-                  },
-                  {
-                    key: "secretsGuard",
-                    label: "P3 · secret hygiene",
-                    desc: "Force .env / .env.local into .gitignore every run",
-                  },
-                  {
-                    key: "preCommit",
-                    label: "P4 · pre-commit guard",
-                    desc: "Install .githooks — staged .env files are refused",
-                  },
-                  {
-                    key: "schemaGate",
-                    label: "P5 · schema gate",
-                    desc: "jq parse locally · devcontainer build gate in CI",
-                  },
+                  { key: "nonRoot", label: "P1 · non-root execution", desc: "Refuse remoteUser=root" },
+                  { key: "engines", label: "P2 · runtime pinning", desc: "Write .nvmrc on setup" },
+                  { key: "secretsGuard", label: "P3 · secret hygiene", desc: "Force .env into .gitignore" },
+                  { key: "preCommit", label: "P4 · pre-commit guard", desc: "Install .githooks" },
+                  { key: "schemaGate", label: "P5 · schema gate", desc: "jq parse + CI build gate" },
                 ] as { key: keyof Enforcement; label: string; desc: string }[]
               ).map((d) => (
                 <Switch
@@ -916,14 +1029,9 @@ export default function App() {
                   desc={d.desc}
                 />
               ))}
-              <p className="font-mono text-[10.5px] text-mist-600 leading-relaxed">
-                policies are compiled into <span className="text-mist-300">setup-env.sh</span> and
-                re-checked on every push by <span className="text-skyx-400">validate-devcontainer.yml</span>
-              </p>
             </Section>
           </Reveal>
 
-          {/* live summary */}
           <Reveal delay={240}>
             <div
               id="sec-summary"
@@ -936,7 +1044,6 @@ export default function App() {
                 <span className="font-mono text-[10.5px] text-lagoon-400">● regenerating</span>
               </div>
 
-              {/* ship readiness gauge */}
               <div className="flex items-center gap-4 pb-3.5 mb-3.5 border-b border-ink-700/70">
                 <div className="relative shrink-0">
                   <Gauge score={ready.score} />
@@ -993,8 +1100,8 @@ export default function App() {
 
               <div className="grid grid-cols-4 gap-3">
                 <div>
-                  <div key={countLines(arts.setup)} className="stat-flash font-display font-bold text-xl text-mist-100">
-                    {countLines(arts.setup)}
+                  <div key={bundle.arts.setup.split("\n").length} className="stat-flash font-display font-bold text-xl text-mist-100">
+                    {bundle.arts.setup.split("\n").length}
                   </div>
                   <div className="font-mono text-[10px] text-mist-600 uppercase tracking-wider">script lines</div>
                 </div>
@@ -1030,7 +1137,6 @@ export default function App() {
           </Reveal>
         </div>
 
-        {/* right · artifacts */}
         <div className="space-y-5 min-w-0">
           <Reveal delay={60}>
             <div className="relative">
@@ -1065,11 +1171,73 @@ export default function App() {
           </Reveal>
 
           <Reveal delay={100}>
-            <BootstrapStrip line={bootstrapLine(cfg)} onToast={toast} />
+            <div className="flex items-center gap-3 rounded-xl border border-ink-700/80 bg-ink-900/70 px-3.5 py-2.5 transition-colors duration-200 hover:border-ember-500/40">
+              <span className="font-mono text-[13px] text-ember-400 shrink-0 select-none">$</span>
+              <code className="font-mono text-[12px] text-mist-300 truncate">{bootstrapLine(cfg)}</code>
+              <button
+                type="button"
+                onClick={async () => {
+                  if (await copyText(bootstrapLine(cfg))) {
+                    toast("bootstrap one-liner copied");
+                  } else toast("Clipboard unavailable in this browser");
+                }}
+                className="ml-auto shrink-0 flex items-center gap-1.5 rounded-md border border-ink-600 px-2.5 py-1.5 font-mono text-[11px] text-mist-300 transition-all hover:border-ember-500/50 hover:text-ember-300 active:scale-95"
+              >
+                <IconCopy className="w-3 h-3" />
+                copy
+              </button>
+            </div>
           </Reveal>
 
           <Reveal delay={120}>
             <PolicyMatrix policies={policies} />
+          </Reveal>
+
+          <Reveal delay={140}>
+            <div className="border border-ink-700/80 rounded-xl bg-ink-900/70 px-4 py-3 transition-colors duration-300 hover:border-ink-600">
+              <div className="flex items-center justify-between mb-3">
+                <p className="font-mono text-[10.5px] uppercase tracking-[0.2em] text-mist-600">
+                  configuration analytics
+                </p>
+                <span className="font-mono text-[10px] text-mist-500">
+                  complexity: {analytics.complexityScore}/100
+                </span>
+              </div>
+              <div className="grid grid-cols-3 gap-3 text-center">
+                <div>
+                  <div className="font-display font-bold text-xl text-mist-100">
+                    {analytics.featureUsage.length}
+                  </div>
+                  <div className="font-mono text-[9px] text-mist-600 uppercase tracking-wider">
+                    features
+                  </div>
+                </div>
+                <div>
+                  <div className="font-display font-bold text-xl text-mist-100">
+                    {analytics.toolchainUsage.length}
+                  </div>
+                  <div className="font-mono text-[9px] text-mist-600 uppercase tracking-wider">
+                    toolchains
+                  </div>
+                </div>
+                <div>
+                  <div className="font-display font-bold text-xl text-mist-100">
+                    {analytics.policyCompliance.filter(p => p.enabled).length}/5
+                  </div>
+                  <div className="font-mono text-[9px] text-mist-600 uppercase tracking-wider">
+                    policies
+                  </div>
+                </div>
+              </div>
+              {analytics.recommendations.length > 0 && (
+                <div className="mt-3 pt-3 border-t border-ink-700/70">
+                  <p className="font-mono text-[10px] text-mist-500 mb-1">💡 recommendations</p>
+                  <p className="text-[11px] text-mist-400 leading-relaxed">
+                    {analytics.recommendations[0]}
+                  </p>
+                </div>
+              )}
+            </div>
           </Reveal>
 
           <div id="artifacts" className="scroll-mt-24">
@@ -1083,8 +1251,6 @@ export default function App() {
               <div id="sec-anatomy" className="scroll-mt-24">
                 <LayerStack cfg={cfg} />
               </div>
-
-              {/* ship pipeline */}
               <div className="border border-ink-700/80 rounded-xl bg-ink-900/70 px-4 sm:px-5 py-4 transition-colors duration-300 hover:border-ink-600">
                 <p className="font-mono text-[10.5px] uppercase tracking-[0.2em] text-mist-600 mb-3.5">
                   ship pipeline
@@ -1137,22 +1303,33 @@ export default function App() {
               </div>
             </div>
           </Reveal>
+
+          <Reveal delay={200}>
+            <div className="space-y-5">
+              <CostEstimation config={cfg} />
+              <DependencyGraph config={cfg} />
+              <MultiEnvironmentSelector config={cfg} onApply={setCfg} />
+              <AnalyticsDashboard config={cfg} />
+              <ConfigValidator config={cfg} />
+              <ConfigLinter config={cfg} />
+              <ExportFormatSelector config={cfg} />
+              <BackupRestoreSystem currentConfig={cfg} onRestore={setCfg} />
+              <SprintFlowchart config={cfg} />
+              <CustomLintRules config={cfg} />
+            </div>
+          </Reveal>
         </div>
       </main>
 
-      {/* ── footer with simulated registry feed ────────────────────────── */}
       <footer className="border-t border-ink-700/70 bg-ink-950/80">
         <div className="max-w-[1480px] mx-auto px-4 sm:px-6 py-3.5 flex flex-wrap items-center gap-x-6 gap-y-1.5 font-mono text-[11px] text-mist-600">
           <span className="flex items-center gap-2">
             <span className="led-live w-1.5 h-1.5 rounded-full bg-lagoon-400" />
-            forge v1.7.0 · spec devcontainers/v0.245.2 · toolchains + policy gates P1–P5
+            forge v2.9.0 · spec devcontainers/v0.245.2 · compliance & audit + version control + real-time collaboration + performance profiler + advanced analytics + AI insights
           </span>
           <span className="hidden md:inline">manifest autosaves to this browser</span>
-          <span className="sm:ml-auto flex items-center gap-2.5 min-w-0 max-w-full">
-            <span className="shrink-0 uppercase tracking-[0.16em] text-[9.5px] text-mist-600 border border-ink-700 rounded px-1.5 py-0.5">
-              ghcr events · sim
-            </span>
-            <FeedLine img={img} />
+          <span className="sm:ml-auto">
+            target <span className="text-ember-400/90">{img}</span>
           </span>
         </div>
       </footer>
@@ -1172,7 +1349,23 @@ export default function App() {
         />
       )}
       <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} groups={commands} />
-      <Toasts toasts={toasts} />
+      <ShortcutsModal open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} />
+      <OnboardingTour open={onboardingOpen} onClose={() => setOnboardingOpen(false)} />
+      <TemplatePicker open={templatePickerOpen} onClose={() => setTemplatePickerOpen(false)} onSelect={applyTemplate} />
+      <ChangelogModal open={changelogOpen} onClose={() => setChangelogOpen(false)} />
+      <PerfDashboard open={perfDashboardOpen} onClose={() => setPerfDashboardOpen(false)} />
+      <CompareMode currentConfig={cfg} onClose={() => setCompareOpen(false)} />
+      {securityAuditOpen && <SecurityAuditModal config={cfg} onClose={() => setSecurityAuditOpen(false)} />}
+      {githubTemplateOpen && <GitHubTemplateExport config={cfg} onClose={() => setGithubTemplateOpen(false)} />}
+      {bashPlaygroundOpen && <BashPlayground onClose={() => setBashPlaygroundOpen(false)} />}
+      {wizardOpen && <ConfigurationWizard onComplete={(newConfig) => { setCfg(newConfig); setWizardOpen(false); toast("Configuration applied from wizard"); }} onClose={() => setWizardOpen(false)} />}
+      <AIAssistantPanel config={cfg} analytics={analytics} isOpen={aiAssistantOpen} onClose={() => setAiAssistantOpen(false)} />
+      <VisualBuilder config={cfg} onConfigChange={setCfg} isOpen={visualBuilderOpen} onClose={() => setVisualBuilderOpen(false)} />
+      <PerformanceProfiler config={cfg} isOpen={performanceProfilerOpen} onClose={() => setPerformanceProfilerOpen(false)} />
+      <CollaborationPanel config={cfg} onConfigChange={setCfg} isOpen={collaborationOpen} onClose={() => setCollaborationOpen(false)} />
+      <VersionControlPanel config={cfg} onConfigChange={setCfg} isOpen={versionControlOpen} onClose={() => setVersionControlOpen(false)} />
+      <CompliancePanel config={cfg} isOpen={complianceOpen} onClose={() => setComplianceOpen(false)} />
+      <Toasts />
     </div>
   );
 }
