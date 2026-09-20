@@ -21,6 +21,7 @@ import LayerStack from "./components/LayerStack";
 import MultiEnvironmentSelector from "./components/MultiEnvironmentSelector";
 import OnboardingTour from "./components/OnboardingTour";
 import PerfDashboard from "./components/PerfDashboard";
+import { PerformanceProfiler } from "./components/PerformanceProfiler";
 import PolicyMatrix from "./components/PolicyMatrix";
 import SecurityAuditModal from "./components/SecurityAuditModal";
 import ShortcutsModal from "./components/ShortcutsModal";
@@ -92,6 +93,7 @@ export default function App() {
   const [wizardOpen, setWizardOpen] = useState(false);
   const [aiAssistantOpen, setAiAssistantOpen] = useState(false);
   const [visualBuilderOpen, setVisualBuilderOpen] = useState(false);
+  const [performanceProfilerOpen, setPerformanceProfilerOpen] = useState(false);
   const announcedRestore = useRef(false);
   const announcedOnboarding = useRef(false);
 
@@ -405,7 +407,7 @@ export default function App() {
               <div className="font-display font-bold tracking-[0.04em] text-[15px] text-mist-100 whitespace-nowrap">
                 DEVCONTAINER <span className="text-ember-500">FORGE</span>
                 <span className="ml-2 text-[9px] font-mono font-normal text-mist-600 bg-ink-800 px-1.5 py-0.5 rounded border border-ink-700">
-                  v2.5.0
+                  v2.6.0
                 </span>
               </div>
               <div className="font-mono text-[10.5px] text-mist-600 truncate">
@@ -550,6 +552,20 @@ export default function App() {
                 <rect x="9" y="2" width="5" height="5" rx="0.5" />
                 <rect x="2" y="9" width="5" height="5" rx="0.5" />
                 <rect x="9" y="9" width="5" height="5" rx="0.5" />
+              </svg>
+            </button>
+            <button
+              type="button"
+              onClick={() => setPerformanceProfilerOpen(true)}
+              title="Performance Profiler"
+              className="grid place-items-center w-8 h-8 rounded-lg border border-ink-700 bg-ink-900/60 text-mist-500 transition-all hover:border-purple-500/50 hover:text-purple-400 active:scale-95"
+            >
+              <svg viewBox="0 0 16 16" className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="1.5">
+                <path d="M2 12L6 8l3 3 5-7" strokeLinecap="round" strokeLinejoin="round" />
+                <circle cx="2" cy="12" r="1" fill="currentColor" />
+                <circle cx="6" cy="8" r="1" fill="currentColor" />
+                <circle cx="9" cy="11" r="1" fill="currentColor" />
+                <circle cx="14" cy="4" r="1" fill="currentColor" />
               </svg>
             </button>
             <button
@@ -1231,7 +1247,7 @@ export default function App() {
         <div className="max-w-[1480px] mx-auto px-4 sm:px-6 py-3.5 flex flex-wrap items-center gap-x-6 gap-y-1.5 font-mono text-[11px] text-mist-600">
           <span className="flex items-center gap-2">
             <span className="led-live w-1.5 h-1.5 rounded-full bg-lagoon-400" />
-            forge v2.5.0 · spec devcontainers/v0.245.2 · advanced analytics + trend analysis + AI insights + data persistence
+            forge v2.6.0 · spec devcontainers/v0.245.2 · performance profiler + advanced analytics + trend analysis + AI insights
           </span>
           <span className="hidden md:inline">manifest autosaves to this browser</span>
           <span className="sm:ml-auto">
@@ -1267,6 +1283,7 @@ export default function App() {
       {wizardOpen && <ConfigurationWizard onComplete={(newConfig) => { setCfg(newConfig); setWizardOpen(false); toast("Configuration applied from wizard"); }} onClose={() => setWizardOpen(false)} />}
       <AIAssistantPanel config={cfg} isOpen={aiAssistantOpen} onClose={() => setAiAssistantOpen(false)} />
       <VisualBuilder config={cfg} onConfigChange={setCfg} isOpen={visualBuilderOpen} onClose={() => setVisualBuilderOpen(false)} />
+      <PerformanceProfiler config={cfg} isOpen={performanceProfilerOpen} onClose={() => setPerformanceProfilerOpen(false)} />
       <Toasts />
     </div>
   );
