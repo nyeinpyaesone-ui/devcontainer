@@ -119,6 +119,7 @@ const MAKEFILE_GROUPS: (string | null)[] = [
 // immutable strings, so this is safe; we cap the cache to bound memory.
 const hlCache = new Map<string, ReactNode>();
 const HL_CACHE_MAX = 6000;
+const CACHE_CLEANUP_RATIO = 0.5;
 
 export function highlightLine(line: string, lang: Lang): ReactNode {
   const key = lang + "\u0000" + line;
@@ -131,7 +132,12 @@ export function highlightLine(line: string, lang: Lang): ReactNode {
   else if (lang === "markdown") node = tokenize(line, MARKDOWN_RE, MARKDOWN_GROUPS);
   else if (lang === "makefile") node = tokenize(line, MAKEFILE_RE, MAKEFILE_GROUPS);
   else node = tokenize(line, BASH_RE, BASH_GROUPS);
-  if (hlCache.size >= HL_CACHE_MAX) hlCache.clear();
+  
+  // LRU-style eviction: when cache is full, remove oldest half to prevent memory bloat
+  if (hlCache.size >= HL_CACHE_MAX) {
+    const keysToRemove = Array.from(hlCache.keys()).slice(0, Math.floor(HL_CACHE_MAX * CACHE_CLEANUP_RATIO));
+    keysToRemove.forEach(k => hlCache.delete(k));
+  }
   hlCache.set(key, node);
   return node;
 }

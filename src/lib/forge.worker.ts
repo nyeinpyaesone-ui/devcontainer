@@ -12,8 +12,10 @@ export interface WorkerRequest {
 
 export interface WorkerResponse {
   id: number;
-  bundle: ForgeBundle;
-  ms: number;
+  bundle?: ForgeBundle;
+  ms?: number;
+  error?: string;
+  stack?: string;
 }
 
 self.onmessage = (e: MessageEvent<WorkerRequest>) => {
@@ -24,10 +26,12 @@ self.onmessage = (e: MessageEvent<WorkerRequest>) => {
     const ms = performance.now() - t0;
     (self as unknown as Worker).postMessage({ id, bundle, ms } satisfies WorkerResponse);
   } catch (err) {
-    // Surface failures to the main thread so it can fall back to sync compute.
+    // Surface failures to the main thread with full error context for debugging
+    const errorObj = err instanceof Error ? err : new Error(String(err));
     (self as unknown as Worker).postMessage({
       id,
-      error: err instanceof Error ? err.message : "worker failure",
-    });
+      error: errorObj.message,
+      stack: errorObj.stack,
+    } satisfies WorkerResponse);
   }
 };

@@ -1577,36 +1577,15 @@ export const totalLayerMb = (layers: LayerInfo[]) =>
 
 // ── session persistence (built on services/persistence) ─────────────────────
 
-function mergeList<T extends { id: string }>(
-  defs: T[],
-  got?: Array<Partial<T> & { id: string }>
-): T[] {
-  return defs.map((d) => {
-    const g = got?.find((x) => x && x.id === d.id);
-    return g ? { ...d, ...g } : d;
-  });
-}
-
-const manifestStore = defineStore<Config>("dcforge.manifest.v1", DEFAULT_CONFIG, (raw, defaults) => {
-  const p = raw as Partial<Config>;
-  const cfg: Config = {
-    ...defaults,
-    ...p,
-    features: mergeList(defaults.features, p.features),
-    postSteps: mergeList(defaults.postSteps, p.postSteps),
-    toolGroups: mergeList(defaults.toolGroups, p.toolGroups),
-    langs: mergeList(defaults.langs, p.langs),
-    enforce: { ...defaults.enforce, ...(p.enforce ?? {}) },
-    git: { ...defaults.git, ...(p.git ?? {}) },
-  };
-  // migrate legacy persisted manifests (pre git-internals)
-  const legacy = p as { cloneRepo?: boolean };
-  if (!("clone" in p) && legacy.cloneRepo === false) cfg.clone = "off";
-  return cfg;
-});
+const STORE_KEY = "dcforge.manifest.v1";
+const STORE_VERSION = 1;
 
 export function saveConfig(c: Config) {
-  manifestStore.save(c);
+  try {
+    localStorage.setItem(STORE_KEY, JSON.stringify({ version: STORE_VERSION, config: c }));
+  } catch {
+    /* storage unavailable — ignore */
+  }
 }
 
 export function clearConfig() {
@@ -1614,6 +1593,43 @@ export function clearConfig() {
 }
 
 export function loadConfig(): { cfg: Config; restored: boolean } {
-  const { value, restored } = manifestStore.load();
-  return { cfg: value, restored };
+  try {
+    const raw = localStorage.getItem(STORE_KEY);
+    if (!raw) return { cfg: DEFAULT_CONFIG, restored: false };
+    const parsed = JSON.parse(raw);
+    
+    // Handle legacy format (pre-versioned) or current versioned format
+    const data = typeof parsed === 'object' && parsed.version !== undefined 
+      ? parsed 
+      : { version: 0, config: parsed };
+    
+    // Schema migration hook for future versions
+    if (data.version !== STORE_VERSION) {
+      console.warn(`[config] migrating from v${data.version} to v${STORE_VERSION}`);
+    }
+    
+    const p = data.config as Partial<Config>;
+    if (!p || typeof p !== "object") return { cfg: DEFAULT_CONFIG, restored: false };
+    const mergeList = <T extends { id: string }>(
+      defs: T[],
+      got?: Array<Partial<T> & { id: string }>
+    ): T[] =>
+      defs.map((d) => {
+        const g = got?.find((x) => x && x.id === d.id);
+        return g ? { ...d, ...g } : d;
+      });
+    const cfg: Config = {
+      ...DEFAULT_CONFIG,
+      ...p,
+      features: mergeList(DEFAULT_CONFIG.features, p.features),
+      postSteps: mergeList(DEFAULT_CONFIG.postSteps, p.postSteps),
+      toolGroups: mergeList(DEFAULT_CONFIG.toolGroups, p.toolGroups),
+      langs: mergeList(DEFAULT_CONFIG.langs, p.langs),
+      enforce: { ...DEFAULT_CONFIG.enforce, ...(p.enforce ?? {}) },
+    };
+    return { cfg, restored: true };
+  } catch (err) {
+    console.error('[config] failed to load manifest:', err instanceof Error ? err.message : err);
+    return { cfg: DEFAULT_CONFIG, restored: false };
+  }
 }
